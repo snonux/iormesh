@@ -122,8 +122,8 @@ Notes:
   ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
 - `bootstrap`, `deploy` read `./dist` unless `-dist` names the
   signed release directory.
-- Name services. Every cross-service edge must read `fused`; a
-  `mixed` edge is a fault, never acceptable: follow
+- Name services. Every edge between traced services must read
+  `fused`; a `mixed` edge is never acceptable: follow
   [ch. 6](../../guide/06-collect-build.md#name-your-services)'s
   steps, proposing its `prune -apply`, or stop and ask.
 - Full stack: `show sequence ID -json` or `query -frames`;
