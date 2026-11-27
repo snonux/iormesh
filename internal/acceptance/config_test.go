@@ -78,7 +78,11 @@ func TestRsyncOK(t *testing.T) {
 		// Only one of the two receiver fixes is not enough.
 		{v327, "- Resolves: RHEL-70208 - Path traversal vulnerability in rsync\n", false},
 		{v327, "  * Fix CVE-2024-12088.\n", false},
-		// Older than --fsync (3.2.4), whatever the changelog says.
+		// Older than --fsync (3.2.4), whatever the changelog says; the
+		// floor itself and 3.3.x pass with the fixes (task rp4).
+		{"rsync  version 3.2.4  protocol version 31", el9Changelog, true},
+		{"rsync  version 3.2.3  protocol version 31", el9Changelog, false},
+		{"rsync  version 3.3.0  protocol version 31", el9Changelog, true},
 		{"rsync  version 3.1.3  protocol version 31", el9Changelog, false},
 		{"rsync  version 2.6.9  protocol version 29", "", false},
 		{"openrsync: protocol version 29", el9Changelog, false},

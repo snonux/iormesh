@@ -100,6 +100,9 @@ func TestScore(t *testing.T) {
 		// word must sit on the same side of it as the path (pinned).
 		"unless split at e.g.": {unless, "the plain ones, e.g. /inventory/reserve", 1},
 		"unless before e.g.":   {unless, "/inventory/reserve was plain, e.g. no TLS", 0},
+		// The words match case-insensitively, like the answer (task rp4).
+		"unless word upper-case": {Question{Excludes: []string{"/inventory/"}, ExcludesUnless: []string{"PLAIN"}},
+			"/inventory/reserve went plain", 0},
 	} {
 		if got := tc.q.Score(tc.answer); len(got) != tc.fails {
 			t.Errorf("%s: failures %v, want %d", name, got, tc.fails)

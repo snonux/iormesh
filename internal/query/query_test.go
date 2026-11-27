@@ -366,22 +366,32 @@ func TestFileTracksOnlyOpens(t *testing.T) {
 // TestFileBaseMatch: a -file glob that matched no path, but the last
 // element of one, reports that path (decision #41, task 0n4): '*' stops
 // at '/', so "*order-42.json*" names no absolute path. A glob that
-// matched a path, or whose last element matched none, reports nothing.
+// matched a path, or whose last element matched none, reports nothing —
+// also when it matched one path whole after another by its last element
+// only (task rp4): a whole match anywhere wins over the base match.
 func TestFileBaseMatch(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		f    Filter
+		rel  string // a relative path a third host opens after the fixture's, if any
 		want string
 	}{
-		{"basename only", Filter{File: "*order-42.json*"}, "/tmp/order-42.json"},
-		{"other filters too", Filter{File: "order-42.json", Host: "app2"}, "/tmp/order-42.json"},
-		{"path matched", Filter{File: "/tmp/*.json"}, ""},
-		{"nothing at all", Filter{File: "*billing.crt*"}, ""},
-		{"slash in glob", Filter{File: "/var/*/order-42.json"}, ""},
-		{"no -file", Filter{}, ""},
+		{"basename only", Filter{File: "*order-42.json*"}, "", "/tmp/order-42.json"},
+		{"other filters too", Filter{File: "order-42.json", Host: "app2"}, "", "/tmp/order-42.json"},
+		{"path matched", Filter{File: "/tmp/*.json"}, "", ""},
+		{"nothing at all", Filter{File: "*billing.crt*"}, "", ""},
+		{"slash in glob", Filter{File: "/var/*/order-42.json"}, "", ""},
+		{"no -file", Filter{}, "", ""},
+		{"one path whole, another by its base", Filter{File: "order-42.json"}, "order-42.json", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			st, err := Run(context.Background(), &bytes.Buffer{}, fixture(t), tc.f, 1<<20)
+			in := fixture(t)
+			if tc.rel != "" {
+				c := &trace{t: t, project: "shop", host: "mC"}
+				c.add(300, 301, schema.KindOpenat, 3, 1, 30, schema.Args{Path: ptr(tc.rel)}).Ret = 3
+				in.Sources = append(in.Sources, c.source("app3", "app3.example.org"))
+			}
+			st, err := Run(context.Background(), &bytes.Buffer{}, in, tc.f, 1<<20)
 			if err != nil {
 				t.Fatal(err)
 			}
