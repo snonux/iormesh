@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,6 +35,13 @@ type Question struct {
 	Sequence []string `yaml:"answer_sequence"`
 	// Excludes must not appear: the wrong answers a guess would give.
 	Excludes []string `yaml:"answer_excludes"`
+	// ExcludesUnless narrows Excludes to a clause (split at ";", a line
+	// end or a sentence's "."): an excluded string fails the answer only
+	// in a clause holding none of these words. It lets an answer name a
+	// wrong candidate as wrong — "/inventory/reserve went unencrypted"
+	// for "which paths went over TLS" (task fp4) — while a clause that
+	// claims it still fails.
+	ExcludesUnless []string `yaml:"answer_excludes_unless"`
 	// Regex must match the answer (RE2, matched case-insensitively).
 	Regex string `yaml:"answer_regex"`
 	// NotRegex must not match the answer: an exclusion a substring cannot
@@ -64,8 +72,9 @@ func LoadSet(path string) (Set, error) {
 // Validate rejects a set that cannot score: no scenario, a threshold
 // outside (0, 1], no questions, a question without an id, text or
 // positive matcher (answer_contains, answer_sequence or answer_regex —
-// exclusions alone pass an empty answer), a duplicate id, an empty
-// matcher string or a bad regex.
+// exclusions alone pass an empty answer), answer_excludes_unless without
+// answer_excludes, a duplicate id, an empty matcher string or a bad
+// regex.
 func (s Set) Validate() error {
 	switch {
 	case s.Scenario == "":
@@ -101,8 +110,10 @@ func (q Question) validate() error {
 		// answer or "I do not know" holds none of it and would pass.
 		return errors.New("no positive matcher (answer_contains, answer_sequence or " +
 			"answer_regex): an empty answer would pass")
+	case len(q.ExcludesUnless) > 0 && len(q.Excludes) == 0:
+		return errors.New("answer_excludes_unless without answer_excludes: it narrows nothing")
 	}
-	for _, list := range [][]string{q.Contains, q.Sequence, q.Excludes} {
+	for _, list := range [][]string{q.Contains, q.Sequence, q.Excludes, q.ExcludesUnless} {
 		for _, s := range list {
 			if strings.TrimSpace(s) == "" {
 				return errors.New("an empty matcher string matches every answer")
@@ -134,7 +145,7 @@ func (q Question) Score(answer string) []string {
 			strings.Join(q.Sequence[:i], ", ")))
 	}
 	for _, s := range q.Excludes {
-		if strings.Contains(a, strings.ToLower(s)) {
+		if q.excluded(a, strings.ToLower(s)) {
 			fails = append(fails, fmt.Sprintf("contains excluded %q", s))
 		}
 	}
@@ -145,6 +156,28 @@ func (q Question) Score(answer string) []string {
 		fails = append(fails, fmt.Sprintf("matches excluded /%s/", q.NotRegex))
 	}
 	return fails
+}
+
+// clauseEnd splits an answer into the clauses ExcludesUnless scopes:
+// at ";", a line end, or a "." that ends a sentence (followed by space
+// or the end), so the dots of a file name or an address do not split.
+var clauseEnd = regexp.MustCompile(`;|\n|\.(\s|$)`)
+
+// excluded reports whether the lower-cased answer a holds the
+// lower-cased excluded string s: anywhere, or with ExcludesUnless set,
+// in a clause that holds none of its words.
+func (q Question) excluded(a, s string) bool {
+	if len(q.ExcludesUnless) == 0 {
+		return strings.Contains(a, s)
+	}
+	for _, clause := range clauseEnd.Split(a, -1) {
+		if strings.Contains(clause, s) && !slices.ContainsFunc(q.ExcludesUnless, func(w string) bool {
+			return strings.Contains(clause, strings.ToLower(w))
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // missingInOrder is the index of the first item of seq that does not

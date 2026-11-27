@@ -52,6 +52,8 @@ func TestLoadSetRejects(t *testing.T) {
 		"no scenario":      {strings.Replace(ok, "scenario: s", "scenario: ''", 1) + "    answer_regex: x\n", "no scenario"},
 		"duplicate id":     {ok + "    answer_regex: x\n  - id: a\n    question: q?\n    answer_regex: x\n", "duplicate"},
 		"no question text": {strings.Replace(ok, "q?", "' '", 1) + "    answer_regex: x\n", "no question"},
+		"unless alone":     {ok + "    answer_regex: x\n    answer_excludes_unless: [plain]\n", "answer_excludes_unless"},
+		"empty unless":     {ok + "    answer_regex: x\n    answer_excludes: [y]\n    answer_excludes_unless: ['']\n", "empty matcher"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "q.yaml")
@@ -69,23 +71,29 @@ func TestLoadSetRejects(t *testing.T) {
 // reports.
 func TestScore(t *testing.T) {
 	seq := Question{Sequence: []string{"gateway", "orders", "inventory", "billing"}}
+	unless := Question{Excludes: []string{"/inventory/"}, ExcludesUnless: []string{"plain", "unencrypted"}}
 	for name, tc := range map[string]struct {
 		q      Question
 		answer string
 		fails  int
 	}{
-		"contains":            {Question{Contains: []string{"DataStore#save"}}, "it was datastore#SAVE", 0},
-		"contains missing":    {Question{Contains: []string{"DataStore#save", "tmp"}}, "DataStore#save", 1},
-		"sequence in order":   {seq, "gateway -> orders -> inventory -> billing -> inventory", 0},
-		"sequence reordered":  {seq, "gateway, orders, billing, inventory", 1},
-		"sequence repeated":   {Question{Sequence: []string{"a", "a"}}, "a", 1},
-		"excluded present":    {Question{Excludes: []string{"withdraw"}}, "ServiceNode#withdraw", 1},
-		"excluded absent":     {Question{Excludes: []string{"withdraw"}}, "ServiceNode#retire", 0},
-		"regex":               {Question{Regex: `tmp[\s\S]*renam`}, "wrote x.TMP\nthen RENAMED it", 0},
-		"regex fails":         {Question{Regex: `tmp[\s\S]*renam`}, "renamed, then tmp", 1},
-		"not regex matches":   {Question{NotRegex: `/orders\b`}, "/inventory/reserve, /orders", 1},
-		"not regex prefix":    {Question{NotRegex: `/orders\b`}, "/ordersx only", 0},
-		"every matcher fails": {Question{Contains: []string{"x"}, Excludes: []string{"y"}, Regex: "z"}, "y", 3},
+		"contains":                  {Question{Contains: []string{"DataStore#save"}}, "it was datastore#SAVE", 0},
+		"contains missing":          {Question{Contains: []string{"DataStore#save", "tmp"}}, "DataStore#save", 1},
+		"sequence in order":         {seq, "gateway -> orders -> inventory -> billing -> inventory", 0},
+		"sequence reordered":        {seq, "gateway, orders, billing, inventory", 1},
+		"sequence repeated":         {Question{Sequence: []string{"a", "a"}}, "a", 1},
+		"excluded present":          {Question{Excludes: []string{"withdraw"}}, "ServiceNode#withdraw", 1},
+		"excluded absent":           {Question{Excludes: []string{"withdraw"}}, "ServiceNode#retire", 0},
+		"regex":                     {Question{Regex: `tmp[\s\S]*renam`}, "wrote x.TMP\nthen RENAMED it", 0},
+		"regex fails":               {Question{Regex: `tmp[\s\S]*renam`}, "renamed, then tmp", 1},
+		"not regex matches":         {Question{NotRegex: `/orders\b`}, "/inventory/reserve, /orders", 1},
+		"not regex prefix":          {Question{NotRegex: `/orders\b`}, "/ordersx only", 0},
+		"every matcher fails":       {Question{Contains: []string{"x"}, Excludes: []string{"y"}, Regex: "z"}, "y", 3},
+		"unless exempts its clause": {unless, "/orders is https; /inventory/reserve went unencrypted", 0},
+		"unless per sentence":       {unless, "/orders is https. /inventory/ was PLAIN.\n", 0},
+		"unless elsewhere":          {unless, "/inventory/reserve is https; /stock is plain", 1},
+		"unless no word":            {unless, "/orders and /inventory/reserve are https", 1},
+		"unless every clause":       {unless, "/inventory/a is plain. /inventory/b is https", 1},
 	} {
 		if got := tc.q.Score(tc.answer); len(got) != tc.fails {
 			t.Errorf("%s: failures %v, want %d", name, got, tc.fails)

@@ -11,8 +11,8 @@
 #
 # The threshold is pinned here, with the questions, before the first run
 # (#37: 8 of 10, M5's bar). The questions are never reworded, dropped or
-# re-scored to make a run pass; they change only when the scenario does,
-# recorded with the reason.
+# re-scored to make a run pass; they change only when the scenario does
+# or the owner decides, for later runs, recorded with the reason.
 scenario: microservices
 threshold: 0.8
 questions:
@@ -58,11 +58,18 @@ questions:
     answer_excludes: ["/inventory/stock"]
     answer_not_regex: '/billing/charge[\s\S]*/inventory/reserve'
 
+  # The check changed on 2026-11-27 (owner decision, task fp4): an answer
+  # may name the /inventory/ paths as plain HTTP; only a clause that
+  # names an /inventory/ path without saying it was plain fails. Later
+  # runs only: earlier runs keep their scores (#37).
   - id: tls-hops
     question: >-
       Which request paths went over TLS (https)? Name the paths.
     answer_contains: ["/orders", "/billing/charge"]
     answer_excludes: ["/inventory/"]
+    answer_excludes_unless:
+      ["unencrypted", "plain", "cleartext", "clear text", "not tls",
+       "not over tls", "not https", "no tls", "without tls", "non-tls"]
 
   - id: billing-record
     question: >-

@@ -258,6 +258,13 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     state; guide chapter 6 says so and what to do. The rerun's
     three mixed edges were the build cutting each running
     session's trace at a different instant, fixed by #43.
+  - **Amended (owner, 2026-11-27): `tls-hops` allows naming the
+    plain paths** (task fp4). An answer may name the
+    `/inventory/` paths as unencrypted; only a clause that names
+    one without saying it was plain fails
+    (`answer_excludes_unless`). For later runs only: the runs
+    it would have changed (8n4, bp4 glm guided) keep their
+    scores.
   - **Data.** Both providers see everything the agent sees:
     the prompt, the docs, and all command output from the VMs
     — host names and addresses of the f3 VMs, the synthetic

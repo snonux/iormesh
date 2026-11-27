@@ -180,6 +180,17 @@ edge to orders, inventory and billing in `iormeshctl show edges`.
 A run passes with no rule broken, within budget, with the mesh and
 with the score.
 
+`tls-hops` changed on 2026-11-27 by the owner's decision (task
+fp4, an amendment to #37): a right answer often names the
+`/inventory/` paths too, as the plain ones, and its plain
+`answer_excludes` failed that. Its exclusion now holds per clause
+(split at `;`, a line end or a sentence's `.`) and spares a clause
+that says the path was plain (`unencrypted`, `plain`, `not TLS`,
+…; `answer_excludes_unless`). A clause naming an `/inventory/`
+path without such a word still fails, so "/inventory/reserve went
+over TLS" does; `TestTLSHopsPlainInventory` holds both, with the
+bp4 glm answer. Results from before keep their scores.
+
 ## Known limits
 
 **Start-up reads before late attach carry no Java method.**
@@ -475,7 +486,9 @@ The stuck points, each a task (`+agent`):
   plain; the question excludes `/inventory/`, so the right answer
   scored as a miss, as in the rerun. #37 forbids re-scoring for a
   run's sake; the task asks the owner whether the question should
-  say so for later runs.
+  say so for later runs. The owner allowed the plain mentions;
+  the check changed for later runs ("Preparation, budget and
+  score").
 
 Results: in `eval/agent-trial/results/`,
 `2026-11-27-claude-sonnet-5-5-automatic.json`,
