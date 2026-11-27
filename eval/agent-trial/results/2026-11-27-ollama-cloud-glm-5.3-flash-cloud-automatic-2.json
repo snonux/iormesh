@@ -1,0 +1,78 @@
+{
+  "agent": "pi",
+  "model": "ollama-cloud/glm-5.3-flash:cloud",
+  "mode": "automatic",
+  "date": "2026-11-27",
+  "commit": "b7c79f9",
+  "turns": 76,
+  "max_turns": 150,
+  "minutes": 10.38240619125,
+  "mesh": true,
+  "threshold": 0.8,
+  "score": 1,
+  "passed": true,
+  "questions": [
+    {
+      "id": "orders-caller",
+      "passed": true,
+      "answer": "gateway",
+      "failures": []
+    },
+    {
+      "id": "orders-callees",
+      "passed": true,
+      "answer": "inventory, billing",
+      "failures": []
+    },
+    {
+      "id": "gateway-callees",
+      "passed": true,
+      "answer": "inventory, orders",
+      "failures": []
+    },
+    {
+      "id": "checkout-entry",
+      "passed": true,
+      "answer": "POST /orders",
+      "failures": []
+    },
+    {
+      "id": "gateway-stock",
+      "passed": true,
+      "answer": "GET /inventory/stock/widget",
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "POST /inventory/reserve (to inventory), then POST /billing/charge (to billing)",
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": true,
+      "answer": "/orders and /billing/charge",
+      "failures": []
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "`/tmp/tmp.\u003cround-dir\u003e/billing.d/invoice-42.json`, made to appear by creating `invoice-42.json.tmp` in the same directory, writing 32 B into it, then renaming the .tmp to `invoice-42.json`",
+      "failures": []
+    },
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.DataStore#save",
+      "failures": []
+    },
+    {
+      "id": "billing-cert-remover",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.ServiceNode#withdraw",
+      "failures": []
+    }
+  ],
+  "transcript": "eval/agent-trial/runs/20261127T111331Z-ollama-cloud-glm-5.3-flash-cloud-automatic/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261127T111331Z-ollama-cloud-glm-5.3-flash-cloud-automatic/commands.jsonl"
+}

@@ -393,3 +393,92 @@ Results: in `eval/agent-trial/results/`,
 `2026-11-26-claude-sonnet-5-5-automatic-4.json` (the date is the
 run's UTC day) and the three `2026-11-27-…` files; the transcripts
 stay in the gitignored `runs/` directory.
+
+## The third run (task bp4, 2026-11-27)
+
+After the rerun's three fixes — an4 (`query -frames`), bn4 (a
+Commands item is the command alone; the scripted user answers
+`change` to a condition) and cn4 (#43, `pending` tail connections)
+— all four cells ran again against `iom1` and `iom2` on f3, every
+one on **b7c79f9**: its docs, skill, harness and `mage
+releaseUntagged podman` build (`dist/untagged/0.1.0/`, its
+`UNTAGGED` note naming b7c79f9), from one checkout, in one
+series. Before the first cell both VMs matched the first trial's
+baseline; after each cell the same reset (the agent's or our
+`iormeshctl rm iom2`, then the files, keys and packages) brought
+them back to it, the only package removed each time being the
+agent's `tar`. The first `mage agentTrial` died compiling the
+magefiles (Go build cache files vanished under it) before the
+harness ran; nothing reached the VMs and no transcript existed, so
+it was started again at once: not a cell retry. No harness bug
+turned up.
+
+| Cell | Result | Score | Turns | Minutes | Where it got stuck |
+|---|---|---|---|---|---|
+| Sonnet 5.5, automatic | **pass** | 1.0 | 87 | 10.5 | — |
+| Sonnet 5.5, guided | **pass** | 1.0 | 26 | 7.4 | — |
+| glm-5.3-flash, automatic | **pass** | 1.0 | 76 | 10.4 | — |
+| glm-5.3-flash, guided | **pass** | 0.9 | 35 | 9.1 | a wait written as prose, typed at once (ep4); `tls-hops` (fp4) |
+
+**All four cells pass on one commit: M8 is accepted** (#37,
+[milestones/m8.md](../milestones/m8.md)).
+
+No run had help: the scripted user said only the mode, `yes` (no
+`change` in any cell) or the typed output. The harness's fixed
+no-action line came 3, 1, 1 and 2 times: both Claude cells
+stopped once to ask before signing the `UNTAGGED` build (the
+skill's caution, worded as a question, not a step); the others
+were an empty reply, one stray line and, three times from glm, a
+reply announcing a read without its `READ` line. glm automatic
+put four `RUN` lines in one reply once (turn 52); the harness ran
+the first, as the protocol says, and the agent sent the other
+three one per reply.
+
+The rerun's fixes held:
+
+- **an4** — every cell read Java methods with `query … -frames`
+  (`-ref` of a sequence step, and `-file '/tmp/*/billing.crt'`),
+  which prints `java_frames` by name; no cell grepped
+  `show report`, and every cell got `billing-cert-remover` right.
+- **bn4** — every Commands item was the command alone, compound
+  commands (`a && b`, `cmd; echo …`) included. glm automatic,
+  which failed the rerun on `sudo dnf install -y tar — only if …`,
+  ran the `tar` check as one step and listed the bare install in
+  the next (turn 17).
+- **cn4, confirmed on el9** — three cells built with sessions
+  running and saw the tail: Sonnet guided `tcp 23 fused, 0
+  unresolved, 1 pending` (turn 20, again after `refresh`, turn
+  21), glm automatic `tcp 13 fused, 0 unresolved, 3 pending`
+  (turn 49; a later `refresh`, turn 73, read `tcp 36 fused, 0
+  unresolved`), glm guided `…, 1 pending` (turn 30), each with
+  the `pending … collect and build again` line. Every edge
+  between two traced services read `fused` in every cell's
+  `show edges`; Sonnet automatic's builds had no `pending` line.
+  No `mixed` edge in any cell. glm guided's mesh also held one
+  `(untraced) -> orders` connection, unresolved, at 11:29:04–08,
+  while deploy was still starting the sessions (gateway's last,
+  at 11:29:08): chapter 6's one-sided connection from before
+  `deploy` started, and the agent's answers name it so.
+
+The stuck points, each a task (`+agent`):
+
+- **ep4** — glm guided's first collect step said, as prose, to
+  type it about two minutes after the deploy. The scripted user
+  types the named commands at once, so `refresh` ran 18 s after
+  deploy and collected nothing, twice (turns 25 and 28); after
+  chapter 12 and journal checks, `sleep 150` as a listed command
+  worked (turn 30). Three to four turns. Both Claude cells listed
+  `sleep 180` as a command.
+- **fp4** — glm guided's `tls-hops` answer named `/orders` and
+  `/billing/charge` as https and then the `/inventory/` paths as
+  plain; the question excludes `/inventory/`, so the right answer
+  scored as a miss, as in the rerun. #37 forbids re-scoring for a
+  run's sake; the task asks the owner whether the question should
+  say so for later runs.
+
+Results: in `eval/agent-trial/results/`,
+`2026-11-27-claude-sonnet-5-5-automatic.json`,
+`2026-11-27-claude-sonnet-5-5-guided-2.json`,
+`2026-11-27-ollama-cloud-glm-5.3-flash-cloud-automatic-2.json`
+and `2026-11-27-ollama-cloud-glm-5.3-flash-cloud-guided-2.json`;
+the transcripts stay in the gitignored `runs/` directory.

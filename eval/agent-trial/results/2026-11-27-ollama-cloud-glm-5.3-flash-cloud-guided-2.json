@@ -1,0 +1,80 @@
+{
+  "agent": "pi",
+  "model": "ollama-cloud/glm-5.3-flash:cloud",
+  "mode": "guided",
+  "date": "2026-11-27",
+  "commit": "b7c79f9",
+  "turns": 35,
+  "max_turns": 150,
+  "minutes": 9.126368033333334,
+  "mesh": true,
+  "threshold": 0.8,
+  "score": 0.9,
+  "passed": true,
+  "questions": [
+    {
+      "id": "orders-caller",
+      "passed": true,
+      "answer": "The gateway calls the orders service — `show edges` reads `app:gateway/*--role gateway*  orders  fused  7` (the gateway is `--role gateway`, the only client edge into orders besides the one pre-session `(untraced)` connection).",
+      "failures": []
+    },
+    {
+      "id": "orders-callees",
+      "passed": true,
+      "answer": "The orders service calls inventory and billing — `show edges`: `orders  inventory  fused  7` and `orders  billing  fused  7`.",
+      "failures": []
+    },
+    {
+      "id": "gateway-callees",
+      "passed": true,
+      "answer": "The gateway calls orders and inventory directly — `show edges`: `app:gateway/*--role gateway*  orders  fused  7` and `app:gateway/*--role gateway*  inventory  fused  7`.",
+      "failures": []
+    },
+    {
+      "id": "checkout-entry",
+      "passed": true,
+      "answer": "`POST /orders` — the 3-hop conversations reaching orders, inventory and billing are all `POST /orders` (e.g. conversation 0004, 86 steps; gateway→orders hop over `127.0.0.1:18216`).",
+      "failures": []
+    },
+    {
+      "id": "gateway-stock",
+      "passed": true,
+      "answer": "`GET /inventory/stock/widget` — the 1-hop conversations from the gateway into inventory (`127.0.0.1:18215`), outside the checkout (e.g. conversations 0001, 0003, 0005 …).",
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "While serving the checkout (conversation 0004), orders made `POST /inventory/reserve` to inventory first (step 25, ref orders/iom2/iom2-312f2d1e/19578), then `POST /billing/charge` to billing (step 44, ref orders/iom2/iom2-312f2d1e/19702).",
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": false,
+      "answer": "Two paths went over TLS (https): `POST /orders` (gateway→orders) and `POST /billing/charge` (orders→billing) — both read `\"scheme\":\"https\"` in the http events (and close via `HttpsExchangeImpl`); `POST /inventory/reserve` reads `\"scheme\":\"http\"`, and inventory is served `plain` (TLS `plain` in `show services`), so `/inventory/stock/widget` and `/inventory/reserve` went unencrypted.",
+      "failures": [
+        "contains excluded \"/inventory/\""
+      ]
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "Billing wrote `invoice-42.json` (in its run's `/tmp/tmp.XXXX/billing.d/`). Order: `create` the temporary file `invoice-42.json.tmp` (`openat` via `java.io.FileOutputStream#open`, conversation 0004 step 62) → `write` 32 B into it (step 63) → `close` → `rename` it into place as `invoice-42.json` (step 65, ref billing/iom2/iom2-31caf34d/18115).",
+      "failures": []
+    },
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.DataStore#save` (DataStore.java:34) — the first frame outside the JDK under the `java.io.FileOutputStream#write` of `order-42.json.tmp`.",
+      "failures": []
+    },
+    {
+      "id": "billing-cert-remover",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.ServiceNode#withdraw` (ServiceNode.java:178) — the `unlink` of `/tmp/tmp.…/billing.crt` runs through `java.nio.file.Files#deleteIfExists` under it (on billing's `main` thread).",
+      "failures": []
+    }
+  ],
+  "transcript": "eval/agent-trial/runs/20261127T112528Z-ollama-cloud-glm-5.3-flash-cloud-guided/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261127T112528Z-ollama-cloud-glm-5.3-flash-cloud-guided/commands.jsonl"
+}

@@ -137,7 +137,7 @@ then open only the part you need.
 - [The M8 agent trial harness](testing/agent-trial.md) — running
   `mage agentTrial`, the sandbox, the scripted user, preparation, budget
   and score, the tests (mm4), the first trial's four cells (nm4), the
-  rerun (8n4).
+  rerun (8n4), the third run that accepted M8 (bp4).
   - [Running it (task mm4)](testing/agent-trial.md#running-it-task-mm4)
   - [The sandbox](testing/agent-trial.md#the-sandbox)
   - [The scripted user](testing/agent-trial.md#the-scripted-user)
@@ -148,3 +148,5 @@ then open only the part you need.
     2026-11-26)](testing/agent-trial.md#the-first-trial-task-nm4-2026-11-26)
   - [The rerun (task 8n4,
     2026-11-27)](testing/agent-trial.md#the-rerun-task-8n4-2026-11-27)
+  - [The third run (task bp4,
+    2026-11-27)](testing/agent-trial.md#the-third-run-task-bp4-2026-11-27)

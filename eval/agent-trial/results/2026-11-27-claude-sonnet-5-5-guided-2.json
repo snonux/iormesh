@@ -1,0 +1,78 @@
+{
+  "agent": "claude",
+  "model": "claude-sonnet-5-5",
+  "mode": "guided",
+  "date": "2026-11-27",
+  "commit": "b7c79f9",
+  "turns": 26,
+  "max_turns": 150,
+  "minutes": 7.358369823066667,
+  "mesh": true,
+  "threshold": 0.8,
+  "score": 1,
+  "passed": true,
+  "questions": [
+    {
+      "id": "orders-caller",
+      "passed": true,
+      "answer": "gateway",
+      "failures": []
+    },
+    {
+      "id": "orders-callees",
+      "passed": true,
+      "answer": "inventory and billing",
+      "failures": []
+    },
+    {
+      "id": "gateway-callees",
+      "passed": true,
+      "answer": "orders and inventory",
+      "failures": []
+    },
+    {
+      "id": "checkout-entry",
+      "passed": true,
+      "answer": "POST /orders",
+      "failures": []
+    },
+    {
+      "id": "gateway-stock",
+      "passed": true,
+      "answer": "GET /inventory/stock/widget",
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "POST /inventory/reserve, then POST /billing/charge",
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": true,
+      "answer": "/orders and /billing/charge",
+      "failures": []
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "billing.d/invoice-42.json (in the run's /tmp directory): create invoice-42.json.tmp, write it, then rename it to invoice-42.json",
+      "failures": []
+    },
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.DataStore#save",
+      "failures": []
+    },
+    {
+      "id": "billing-cert-remover",
+      "passed": true,
+      "answer": "iormesh.workload.scenarios.ServiceNode#withdraw",
+      "failures": []
+    }
+  ],
+  "transcript": "eval/agent-trial/runs/20261127T110429Z-claude-sonnet-5-5-guided/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261127T110429Z-claude-sonnet-5-5-guided/commands.jsonl"
+}
