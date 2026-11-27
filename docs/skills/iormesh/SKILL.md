@@ -14,8 +14,7 @@ Guide links below are relative to `docs/skills/iormesh/` in the
 iormesh repository; if one does not open, open the same file under
 `docs/guide/` in your docs copy, or ask the user.
 
-Read first:
-[chapter 13, For agents working with a human](../../guide/13-agents.md).
+Read first: [chapter 13](../../guide/13-agents.md).
 
 ## 1. Start: facts and mode
 
@@ -78,7 +77,7 @@ Approve? yes / no / change
   an earlier output is a new step, explained after that output.
   A wait is a command (`sleep 120`), never a note asking the
   user to wait.
-- Run only the commands the approved explanation names, exactly
+- Run only the commands the latest approved explanation names, exactly
   as written, character for character. A new or changed command
   needs a new explanation and a new approval.
 - Never edit an approved command, not even to fill in a value
@@ -89,10 +88,11 @@ Approve? yes / no / change
   for the value instead.
 - "no": stop and ask what to do instead. "change": write a new
   explanation.
-- After the step, quote the line that proves success. On a
-  failure stop, quote the error and look it up in
-  [chapter 12](../../guide/12-troubleshooting.md). Never retry a
-  command that changes a host in a loop.
+- After the step, quote the line that proves success. A failure
+  ends the step: stop, quote the error and look it up in
+  [chapter 12](../../guide/12-troubleshooting.md). The step's
+  commands not yet run need a new explanation and approval. Never
+  retry a command that changes a host in a loop.
 
 Examples for both modes: [references/examples.md](references/examples.md).
 
@@ -118,7 +118,7 @@ section.
 Notes:
 
 - `bootstrap`, `deploy` read `./dist` unless `-dist` names the
-  signed release directory (ch. 3).
+  signed release directory.
 - Restarting service: register a pattern, not a port
   ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
 - Name services; every expected edge must read `fused`
@@ -159,8 +159,8 @@ to type, even in automatic mode:
 6. Write the `expand:` allowlist — ch. 10.
 7. Decide where trace data may go — ch. 13.
 
-The guide's Human-step boxes on `deploy` (ch. 5), `prune -apply`
-and `rm` (ch. 9) and `expand -apply` (ch. 10) are different: in
+The guide's Human-step boxes on `deploy`, `prune -apply`, `rm`
+and `expand -apply` are different: in
 automatic mode they mean explain, ask, then run it yourself — do
 not hand them to the user.
 

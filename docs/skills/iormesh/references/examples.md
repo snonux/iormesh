@@ -152,6 +152,23 @@ Success: dnf exits 0; command -v tar prints a path
 Approve? yes / no / change
 ```
 
+## A command fails in the middle of a step
+
+The approved step 1 names four checks, and command 2 fails:
+
+```text
+  1. ssh -o BatchMode=yes app1 true
+  2. command -v tar
+  3. rsync --version
+  4. ssh -o BatchMode=yes app1 'id -un; uname -r'
+```
+
+The failure ends step 1: stop, quote the error and explain the
+fix as step 2, here the `tar` install above. Commands 3 and 4
+were never run, and step 2 does not name them, so they are no
+longer approved. Explain them again as step 3 and wait for its
+yes; only the latest approved explanation's commands may run.
+
 ## When the user says "change"
 
 The user: "change: only app1 for now". You write a new

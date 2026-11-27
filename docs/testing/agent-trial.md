@@ -568,11 +568,16 @@ the step boundary after a failure, and the `fused` checkpoint.
 All four bp4 cells installed the same missing `tar` without
 breaking a step and registered all four services by pattern.
 
-The stuck points, each a task (`+agent`): **jp4** (a failed
-command ends its step; its unrun commands need a new
-explanation), **kp4** (the restarting-service rule skipped),
-**lp4** (a `mixed` edge accepted instead of asking for the prune
-or stopping).
+The stuck points, each a task (`+agent`):
+
+- **jp4** — a failed command ends its step; its unrun commands
+  need a new explanation. Fixed by SKILL.md section 2 (a failure
+  ends the step, its commands not yet run need a new explanation
+  and approval, only the latest approved explanation's commands
+  run) and an example in `references/examples.md`.
+- **kp4** — the restarting-service rule skipped.
+- **lp4** — a `mixed` edge accepted instead of asking for the
+  prune or stopping.
 
 Results: `2026-11-27-claude-haiku-5-5-high-automatic.json` and
 `2026-11-27-claude-haiku-5-5-high-guided.json` in
