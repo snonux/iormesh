@@ -112,7 +112,9 @@ tracing, the failed ones are not, and a connection between them
 is seen from one end only (a `mixed` edge in
 [chapter 6](06-collect-build.md#name-your-services)). Once the
 failed hosts are fixed, start every session of the run again in
-one command, before the traffic you want to trace:
+one command (host by host, so a gap of seconds remains; step 2 of
+chapter 6 drops its connections), before the traffic you want to
+trace:
 
 > **Human step.** `-restart` stops and starts the running
 > sessions too; an agent asks first, naming the hosts.

@@ -191,9 +191,9 @@ than that most likely missed one end. What to do:
 1. `iormeshctl status`: every session of both services is
    `running`. A session stopped, ended or never started on the
    far end's host misses its connections: deploy it again
-   ([chapter 5](05-deploy-status.md)); after a partial deploy
-   failure, with `-restart` and the hosts that did start
-   ([chapter 5](05-deploy-status.md#deploy)).
+   ([chapter 5](05-deploy-status.md#deploy)); after a partial
+   deploy failure, with `-restart`, naming the failed and the
+   started hosts together.
 2. An edge whose `FIRST` is before the far end's session
    started (`deploy` printed `started …`): its one-sided
    connections were made while only one end was traced, and
