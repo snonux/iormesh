@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path"
 	"strconv"
 	"strings"
 
@@ -242,16 +241,20 @@ func fileBaseHint(e env, glob, match string) error {
 
 // fileBaseSuggestion is the -file glob the hint suggests, glob in
 // match's directory, as one inert shell word (task pp4): the directory
-// is escaped to match itself alone (viewmodel.GlobLiteral, so "[prod]"
+// is match up to its last '/', as traced — not path.Dir, which cleans
+// it, so "/a//b/c" or "a/../b/c" would get a glob missing the path —
+// escaped to match itself alone (viewmodel.GlobLiteral, so "[prod]"
 // is not read as a class), the glob keeps its wildcards, each
 // non-printable rune of either becomes '?', and viewmodel.ShellWord
 // quotes the whole, so a quote or $(...) in the path stays text when
-// pasted. Every rune is printable, so it is not passed through
-// termsafe.String, whose Go-quoting would break the shell quotes (task
-// 1i4); internal/buildgate's print gate lists it as a sanitizer.
+// pasted. Every rune is printable, so it is printed bare, not through
+// termsafe.String: a shell word is never Go-quoted, which would break
+// its quotes (task 1i4); internal/buildgate's print gate lists it as a
+// sanitizer. A
+// match with no '/' has no directory: the glob alone is suggested.
 func fileBaseSuggestion(glob, match string) string {
-	return viewmodel.ShellWord(path.Join(viewmodel.GlobLiteral(path.Dir(match)),
-		viewmodel.GlobPrintable(glob)))
+	dir := match[:strings.LastIndexByte(match, '/')+1]
+	return viewmodel.ShellWord(viewmodel.GlobLiteral(dir) + viewmodel.GlobPrintable(glob))
 }
 
 // listsSegments tells whether the projects' directories in store list

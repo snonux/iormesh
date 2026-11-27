@@ -86,3 +86,25 @@ func pasteIntoShell(t *testing.T, cmd string) []string {
 	}
 	return strings.Split(strings.TrimSuffix(string(data), "\x00"), "\x00")
 }
+
+// TestGlobPrintable (task pp4): GlobPrintable turns each non-printable
+// rune (C0, C1, bidi) and each invalid byte into '?' and keeps a glob's
+// metacharacters, where GlobLiteral escapes them to match only
+// themselves.
+func TestGlobPrintable(t *testing.T) {
+	for _, tc := range []struct{ in, printable, literal string }{
+		{"a\x1bb", "a?b", "a?b"},
+		{"a\u009bb", "a?b", "a?b"},
+		{"a‮b", "a?b", "a?b"},
+		{"a\xffb", "a?b", "a?b"},
+		{"[prod]/*x*", "[prod]/*x*", `\[prod\]/\*x\*`},
+		{"plain/path", "plain/path", "plain/path"},
+	} {
+		if got := GlobPrintable(tc.in); got != tc.printable {
+			t.Errorf("GlobPrintable(%q) = %q, want %q", tc.in, got, tc.printable)
+		}
+		if got := GlobLiteral(tc.in); got != tc.literal {
+			t.Errorf("GlobLiteral(%q) = %q, want %q", tc.in, got, tc.literal)
+		}
+	}
+}

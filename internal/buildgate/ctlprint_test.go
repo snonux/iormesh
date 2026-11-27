@@ -33,9 +33,9 @@ var printFuncs = map[string]int{
 // (safe, and errText for an error's text) and its name for
 // termsafe.Lines (errLines: a host's multi-line error, each line escaped
 // on its own, task dm4), and query's -file suggestion
-// (fileBaseSuggestion: a shell word whose every rune is printable, which
-// termsafe.String would Go-quote and so break, task pp4). A helper that builds text from safe parts is
-// not listed: its result is wrapped once more at the print, which costs
+// (fileBaseSuggestion: a shell word whose every rune is printable, so it
+// is printed bare; a shell word is never Go-quoted, task pp4). A helper
+// that builds text from safe parts is not listed: its result is wrapped once more at the print, which costs
 // nothing, because termsafe.String leaves printable text, its own output
 // included, unchanged.
 var sanitizers = map[string]bool{

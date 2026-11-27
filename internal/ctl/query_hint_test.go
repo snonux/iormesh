@@ -21,14 +21,21 @@ import (
 // path.Match, the matcher query's -file uses: a single quote in the
 // directory once closed the hint's own quotes and ran the rest, and a
 // glob metacharacter there ([prod]) once made the suggested glob miss
-// the path. The hint stays printable with a non-printable rune in the
-// path. An ordinary path keeps its plain form.
+// the path. The hint stays printable with a non-printable rune (C0, C1,
+// bidi) in the path. An unclean path (//, ./, ..) gets a glob of its
+// directory as traced, not cleaned, so the glob still matches it. An
+// ordinary path keeps its plain form.
 func TestQueryFileBaseHintPasteIsInert(t *testing.T) {
 	for _, tc := range []struct{ path, glob, want string }{
 		{"/tmp/a';echo>PWNED;'/billing.crt", "*billing.crt*", ""},
 		{"/data/[prod]/billing.crt", "*billing.crt*", `try -file '/data/\[prod\]/*billing.crt*'`},
 		{"/var/x\x01y/billing.crt", "*billing.crt*", ""},
 		{"/var/$(echo>PWNED)/billing.crt", "*billing.crt*", ""},
+		{"/var/x\u009by/billing.crt", "*billing.crt*", ""},
+		{"/var/x‮y/billing.crt", "*billing.crt*", ""},
+		{"/a//b/billing.crt", "*billing.crt*", "try -file '/a//b/*billing.crt*'"},
+		{"/a/./b/billing.crt", "*billing.crt*", ""},
+		{"a/../b/billing.crt", "*billing.crt*", "try -file 'a/../b/*billing.crt*'"},
 		{"/etc/billing.crt", "*billing.crt*", "try -file '/etc/*billing.crt*'"},
 	} {
 		text := fileBaseHintText(t, tc.path, tc.glob)
