@@ -1,0 +1,81 @@
+{
+  "agent": "pi",
+  "model": "ollama-cloud/glm-5.3-flash:cloud",
+  "mode": "guided",
+  "date": "2026-11-27",
+  "commit": "370e437",
+  "turns": 27,
+  "max_turns": 150,
+  "minutes": 8.341154565816666,
+  "mesh": false,
+  "mesh_error": "no fused edge to inventory, billing in show edges",
+  "threshold": 0.8,
+  "score": 0.9,
+  "passed": false,
+  "questions": [
+    {
+      "id": "orders-caller",
+      "passed": true,
+      "answer": "The gateway (the `--role gateway` JVM, shown as `app:gateway/*--role gateway*`) — `show edges` lists only `app:gateway/*--role gateway*  orders  fused  4  0` and `show services` names it as orders' only client.",
+      "failures": []
+    },
+    {
+      "id": "orders-callees",
+      "passed": true,
+      "answer": "inventory and billing — edges `orders → inventory` and `orders → billing` (it POSTs `/inventory/reserve` to inventory and `/billing/charge` to billing).",
+      "failures": []
+    },
+    {
+      "id": "gateway-callees",
+      "passed": true,
+      "answer": "orders and inventory — the gateway's only two edges: `app:gateway → orders` and `app:gateway → inventory`.",
+      "failures": []
+    },
+    {
+      "id": "checkout-entry",
+      "passed": true,
+      "answer": "`POST /orders` — conversation 0004 step 1: `app:gateway/…/main -\u003e orders/HTTP-Dispatcher: POST /orders [36 B]` (ref `gateway/paul@iom2/iom2-51b4ad50/8342`); the 3-hop conversation then reaches orders, inventory and billing.",
+      "failures": []
+    },
+    {
+      "id": "gateway-stock",
+      "passed": true,
+      "answer": "`GET /inventory/stock/widget` — the 1-hop gateway→inventory conversations (0001/0003/0005/0007), `\"scheme\":\"http\"`, 200.",
+      "failures": []
+    },
+    {
+      "id": "orders-next-call",
+      "passed": true,
+      "answer": "1. `POST /inventory/reserve` to inventory (step 25, ref `orders/paul@iom2/iom2-b4abbf44/8995`); 2. `POST /billing/charge` to billing (step 44, ref `orders/paul@iom2/iom2-b4abbf44/9120`).",
+      "failures": []
+    },
+    {
+      "id": "tls-hops",
+      "passed": false,
+      "answer": "`/orders` (gateway→orders) and `/billing/charge` (orders→billing) — these carry `\"scheme\":\"https\"` on both ends; `/inventory/stock/widget` and `/inventory/reserve` are `\"scheme\":\"http\"`.",
+      "failures": [
+        "contains excluded \"/inventory/\""
+      ]
+    },
+    {
+      "id": "billing-record",
+      "passed": true,
+      "answer": "`invoice-42.json` (`…/billing.d/invoice-42.json` under the run's `--dir`), made to appear by, in order: create the side file `invoice-42.json.tmp` (FileOutputStream open, ref `billing/paul@iom2/iom2-8875eb13/7294`), write the 32 B record into it (ref `…/7296`), then rename `.tmp -\u003e invoice-42.json` (ref `…/7299`) — steps 62–65 of conversation 0004.",
+      "failures": []
+    },
+    {
+      "id": "order-file-writer",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.DataStore#save` (DataStore.java:34) — the application frame under `java.io.FileOutputStream#write` on the `orders.d/order-42.json.tmp` write (step 76, stack via `show sequence 0004 -json`; the rollup also names DataStore#save for the file).",
+      "failures": []
+    },
+    {
+      "id": "billing-cert-remover",
+      "passed": true,
+      "answer": "`iormesh.workload.scenarios.ServiceNode#withdraw` — `query -file '/tmp/*/billing.crt'` shows the statx+unlink on billing's main thread, and the rollup reads `/tmp/tmp.…/billing.crt: opened for writing …; unlink; by iormesh.workload.scenarios.ServiceNode#withdraw`.\n\nSession state: the four tracer sessions keep tracing until 04:47 UTC today, and the store/builds stay on iom1 under `~/.local/share/iormesh/`. If you want iom2 cleared before that, run `~/bin/iormeshctl rm paul@iom2` yourself (it stops the sessions, syncs the last segments and uninstalls `/opt/iormesh`; it needs your explicit yes, which I cannot collect after this message).",
+      "failures": []
+    }
+  ],
+  "transcript": "eval/agent-trial/runs/20261127T004314Z-ollama-cloud-glm-5.3-flash-cloud-guided/transcript.jsonl",
+  "commands": "eval/agent-trial/runs/20261127T004314Z-ollama-cloud-glm-5.3-flash-cloud-guided/commands.jsonl"
+}

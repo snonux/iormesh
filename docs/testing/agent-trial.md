@@ -294,3 +294,77 @@ of each Claude cell), and the mesh check's names held where the
 agent named the servers with `services name`, as both Claude cells
 did; glm's unnamed mesh failed it. The transcripts stay in the
 gitignored `runs/` directory.
+
+## The rerun (task 8n4, 2026-11-27)
+
+After the ten fixes of the first trial (ym4, zm4, 0n4–7n4) all
+four cells ran again against `iom1` and `iom2` on f3, every one on
+**370e437**: its docs, skill, harness and `mage releaseUntagged
+podman` build (the target's first real run; it built cleanly, and
+both Claude cells read the archive's `UNTAGGED` note and warned
+before signing). Cell 1 ran from a checkout at 370e437; f3 was then
+needed for another job, so the series paused with both VMs reset
+and stopped, and cells 2–4 ran from a second, detached checkout of
+370e437 serving a byte-identical copy of the same
+`dist/untagged/0.1.0/` (`sha256sum -c` passed), so all four results
+name 370e437. Before each run both VMs matched the first trial's
+baseline (its sudoers rule and `/etc/hosts` entries are trial prep
+and stay); after each, the same reset brought them back to it, the
+only package removed each time being the `tar` the agent installed.
+No harness bug turned up, so the series ran once.
+
+| Cell | Result | Score | Turns | Minutes | Where it failed or got stuck |
+|---|---|---|---|---|---|
+| Sonnet 5.5, automatic | **pass** | 1.0 | 83 | 9.1 | an event's Java method outside a conversation (an4) |
+| Sonnet 5.5, guided | **pass** | 1.0 | 29 | 7.5 | the same (an4); a restart gap in its first `ps` |
+| glm-5.3-flash, automatic | fail: rule | 0 | 32 | 3.4 | ran `sudo dnf install -y tar` where step 2 named `sudo dnf install -y tar — only if command 1 shows no tar` (bn4) |
+| glm-5.3-flash, guided | fail: mesh | 0.9 | 27 | 8.3 | three edges `mixed`, one one-sided connection each, right after deploy (cn4) |
+
+No run had help: the scripted user said only the mode, `yes` (no
+`change` in any cell) or the typed output; glm drew the harness's
+fixed no-action line four times in automatic mode by putting `RUN`
+inside a sentence. M8 is not accepted.
+
+The first trial's fixes held where the runs reached them: the
+rsync check by the package changelog took one command (zm4);
+chapter 2 found the missing `tar` and every cell installed it
+(ym4); `query -file '/tmp/*/billing.crt'` matched (0n4); every
+cell that got that far registered patterns, not ports, and named
+the servers before reading (6n4); every cell that answered got the
+new `billing-cert-remover` right (1n4); glm, which failed on a
+filled-in `$(id -un)` last time, ran `id -un` as its own command in
+guided mode and used `$USER` inside one in automatic (3n4); the
+skill's labels drew no bare `change` (4n4).
+glm guided's `tls-hops` answer named the plain `/inventory/` paths
+as the ones that were not TLS, and the question excludes them.
+
+The stuck points, each a task (`+agent`):
+
+- **an4** — `query` prints an event's Java stack as method ids,
+  and billing's `unlink` of `billing.crt` runs on its `main`
+  thread, in no conversation, so `show sequence -json`, the one
+  place chapter 8 names for frames, does not hold it. Both Claude
+  cells found the method by grepping `show report`; right answer,
+  two to four turns.
+- **bn4** — glm's approved step listed two commands with a
+  condition after them (`— only if command 1 shows no tar`) and
+  then ran the bare command. The harness matches exactly, as #37
+  says, so the run failed; the skill says `<exact command>` but
+  never that an item holds the command alone, or that a command
+  that depends on an earlier result is a new step.
+- **cn4** — glm guided's mesh held every cross-service edge, but
+  three of them `mixed`: 4 connections, 1 unresolved each, all in
+  the first round after deploy (00:47:20–23 UTC), after every
+  session had attached (00:47:11, the `iom2` journal). Both Claude
+  meshes, same scenario, were all `fused`, so it is timing. The
+  state stays `mixed` however long one refreshes, while chapter 6
+  says to refresh until new connections fuse and the mesh check
+  wants `fused`; why one end missed the connection, and which of
+  the guide and the check is right, are cn4's (the latter for the
+  owner: #37 asks for "a built mesh holding the workload's
+  cross-service edges").
+
+Results: in `eval/agent-trial/results/`,
+`2026-11-26-claude-sonnet-5-5-automatic-4.json` (the date is the
+run's UTC day) and the three `2026-11-27-…` files; the transcripts
+stay in the gitignored `runs/` directory.
