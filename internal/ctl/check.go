@@ -124,10 +124,11 @@ func checkFile(ctx context.Context, path string) (segment.Summary, error) {
 // The current size counts address space the runtime reserved but has
 // not used yet, above all the rest of the heap arena (64 MiB on
 // linux/amd64): the heap can grow into it without a new mapping, so
-// the cap is space plus at most one arena. That slack is small next
-// to checkAddressSpace, but it makes the cap useless as a test of a
-// small decode under a tiny space (task 6p4); TestCheckCap allocates
-// past the slack instead.
+// the cap is space plus reserved-but-unused mappings (mostly the heap
+// arena's rest). That slack is small next to checkAddressSpace, but it
+// makes the cap useless as a test of a small decode under a tiny space
+// (task 6p4); TestCheckCap allocates past the slack instead, and
+// TestCheckSegmentCapsItself checks the real check sets the cap.
 func capMemory(space int64) error {
 	debug.SetMemoryLimit(space / 2)
 	var cur syscall.Rlimit

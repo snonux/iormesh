@@ -3,6 +3,7 @@ package ctl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -70,6 +71,40 @@ func TestCheckCap(t *testing.T) {
 		if c.fail != (err != nil) || err != nil && !strings.Contains(err.Error(), "check failed") {
 			t.Errorf("%s: %v", c.name, err)
 		}
+	}
+}
+
+// TestCheckSegmentCapsItself (task 6p4): TestCheckCap's child skips the
+// real check, so this one runs it (Main, checkSegmentCommand) on a good
+// segment and has the child report its RLIMIT_AS afterwards
+// (rlimitEnv). The limit must be what capMemory sets: SPACE over a
+// virtual size the child had then, no more than it has now. A check
+// that decoded without capMemory would report no limit.
+func TestCheckSegmentCapsItself(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("RLIMIT_AS is enforced on Linux only")
+	}
+	f := newBuildFixture(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := filepath.Join(t.TempDir(), "rlimit")
+	t.Setenv(rlimitEnv, report)
+	if _, err := childChecker(exe, checkAddressSpace)(context.Background(), f.app1Files[0]); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var limit, mapped uint64
+	if _, err := fmt.Sscan(string(data), &limit, &mapped); err != nil {
+		t.Fatalf("report %q: %v", data, err)
+	}
+	if limit < checkAddressSpace || limit-checkAddressSpace == 0 || limit-checkAddressSpace > mapped {
+		t.Errorf("RLIMIT_AS %d with %d mapped: not %d over the size at the cap", limit, mapped,
+			checkAddressSpace)
 	}
 }
 

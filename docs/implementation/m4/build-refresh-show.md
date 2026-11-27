@@ -39,9 +39,9 @@ iormeshctl show [summary|services|edges|health] [-project P]... [-json]
   child of the same executable whose address space is capped
   (`RLIMIT_AS`: what it mapped at start plus 1 GiB; the GC's soft
   limit at half; 2 minutes at most). What it mapped at start
-  includes the unused rest of the heap arena the runtime has
-  reserved (64 MiB on linux/amd64), so the heap may grow by up to
-  that much more before the cap bites. A hostile file kills the
+  includes reserved but unused mappings, mostly the rest of the
+  heap arena (64 MiB on linux/amd64), so the heap may grow that
+  much past 1 GiB before the cap bites. A hostile file kills the
   child and fails that segment only. Decoding is deterministic,
   so a file the child decoded needs the same memory in the
   build's own process, where it is read again. On macOS
