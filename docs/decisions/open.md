@@ -167,7 +167,13 @@ Part of [Decisions](../decisions.md).
   `user/password@` (task zi4), and, in one generic last pass, a
   denied key's value in any "key, `:` or `=`, value" syntax —
   JSON (`--spring.application.json=`, `curl -d '{…}'`), YAML,
-  quoted dicts, pairs inside shell strings (task rm4); every
+  quoted dicts, pairs inside shell strings (task rm4). Task
+  qp4 holds all of it to one corpus of real secret carriers
+  (`internal/redact/testdata/corpus.tsv`, also read by the Java
+  agent's tests for headers and URLs): a case is masked or an
+  accepted limit listed in docs/schema/redaction.md, and a test
+  fails either way it drifts; still a denylist, the corpus
+  adds the SQL password keywords and Go DSNs it found. Every
   exec of a traced process
   becomes an `exec` event carrying its redacted argv, and the
   environment is never read. A process already running when the
@@ -239,7 +245,9 @@ Part of [Decisions](../decisions.md).
   name — a JWT anywhere in it, or a Bearer/Basic/Digest/
   Negotiate scheme with a credential — since a vendor header
   name says nothing reliable while these shapes do; still a
-  denylist, the shapes are only more deny rules.
+  denylist, the shapes are only more deny rules. Task qp4's
+  corpus (see #9) adds `*authentication*` anywhere, `*hmac*`,
+  `*websocketprotocol*` and any white space after the scheme.
   *Decided (task xh4): templated at the controller's
   aggregations, raw in the events.* The trace keeps the path
   verbatim (no schema change, no data lost, `iormeshctl query`

@@ -20,6 +20,10 @@
 // env off), so a secret passed the conventional way never reaches the
 // policy.
 //
+// testdata/corpus.tsv (task qp4) holds the real secret carriers the
+// policy is tested against, each masked or an accepted limit that
+// docs/schema/redaction.md lists; a new rule needs a corpus line first.
+//
 // It is cgo-free and has no dependencies beyond the standard library, so
 // the correlator, the controller and any later component can share it.
 package redact

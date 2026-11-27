@@ -69,7 +69,10 @@ then open only the part you need.
 - [Graph](schema/graph.md) — the graph, pods as hosts, pod fields (M7).
   - [Pods as hosts (M7)](schema/graph.md#pods-as-hosts-m7)
   - [Pod fields on events (M7)](schema/graph.md#pod-fields-on-events-m7)
-- [Redaction](schema/redaction.md) — what is redacted and how.
+- [Redaction](schema/redaction.md) — what is redacted and how, the shared
+  corpus of secret carriers, the accepted limits.
+  - [The corpus](schema/redaction.md#the-corpus)
+  - [Accepted limits](schema/redaction.md#accepted-limits)
 - [Query slices and summary rollup](schema/query-summary.md) — M5's query
   slices and summary rollup.
   - [Query slices (M5)](schema/query-summary.md#query-slices-m5)

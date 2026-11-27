@@ -23,23 +23,35 @@ and the structure stays:
 | `sudo -u root mysql -ps`, `env X=1 mysql -p s`, `docker login -p s` | `-p***`, `-p ***`, `-p ***` — a flag rule applies after any word naming its program |
 | `--spring.application.json={"db":{"password":"s"}}`, `-d '{"token": "s"}'`, `{'secret': 's'}`, `{\"pwd\":\"s\"}`, `{"tokens":["s"]}`, `/p?token=s&a=1` | `{"db":{"password":"***"}}`, `{"token": "***"}`, `{'secret': '***'}`, `{\"pwd\":\"***\"}`, `{"tokens":***}`, `/p?token=***&a=1` — any denied key, then `:` or `=`, then a value, in any element; `{"password":` as one element masks the next |
 | `ruby -e 'h = {"password" => "s"}'`, `password := s`, `os.environ["PASSWORD"] = "s"`, `sh -c 'run --password a\ s'` | `{"password" => "***"}`, `password := ***`, `os.environ["PASSWORD"] = "***"`, `run --password ***` — an operator run after the separator, a key in a subscript, a backslash-escaped blank in a value |
+| `$ENV{PASSWORD} = 's'`, `token[i] = s`, `passwords := []string{"s"}`, `token := []byte("s")` | `$ENV{PASSWORD} = '***'`, `token[i] = ***`, `passwords := ***`, `token := ***` — a Perl hash key, the name before a subscript, a value glued from parts (task qp4) |
+| `psql -c "ALTER USER u PASSWORD 's'"`, `mysql -e "CREATE USER u IDENTIFIED BY 's'"`, `SET PASSWORD FOR u = PASSWORD('s')`, `IDENTIFIED BY s` | `PASSWORD '***'`, `IDENTIFIED BY '***'`, `PASSWORD('***')`, `IDENTIFIED BY ***` — SQL statements, in any element (task qp4) |
+| `--dsn=u:s@tcp(h:3306)/db`, `u:s@unix(/sock)/db`, `u:s@/db` | `u:***@tcp(h:3306)/db`, … — Go MySQL DSNs without a scheme (task qp4) |
 
 Keys match case-insensitively with `-`, `_` and `.` ignored, so
 one glob covers every spelling. The argv denylist names
 `password`, `passwd`, `passphrase`, `pwd` and `pass` (suffixes),
-`passin` and `passout` (openssl), `secret`,
-`token`, `apikey`, `accesskey`, `privatekey`, `credential`,
-`authorization`, `bearer` and `cookie` anywhere in a key; URL
-userinfo is always masked, query values all (decision #22's
-default). After the specific forms above, one generic pass looks
-at every argv element for a denied key (optionally quoted or
-escaped-quoted, optionally inside a subscript or call:
-`os.environ["PASSWORD"]`, `getenv(TOKEN)`), optional blanks,
-`:` or `=` with the rest of an operator run (`=>` of Ruby, PHP
-and Perl, `:=`, `==`), optional blanks and a value — a quoted
-string up to its matching unescaped quote, an object or array up
-to its matching bracket, or a bare run up to white space, a
-quote or one of `,;&})]` — and masks only the value, so JSON,
+`passin` and `passout` (openssl), `auth` (a suffix:
+`REDISCLI_AUTH`, npm's `_auth`, httpie's `--auth`), `secret`,
+`token`, `apikey`, `accesskey`, `accountkey` (Azure),
+`privatekey`, `credential`, `authorization`, `bearer` and
+`cookie` anywhere in a key. The program-scoped flags are
+`-p` of `mysql*`, `mariadb*`, `mongo*`, `az`, `sshpass` and
+`docker`/`podman login`, `redis-cli -a`, curl's `-u`, `--user`,
+`-U` and `--proxy-user`, httpie's `-a` and `gh secret set`'s
+`-b`/`--body`. URL userinfo is always masked, query values all
+(decision #22's default). After the specific forms above, one
+generic pass looks at every argv element for a denied key
+(optionally quoted or escaped-quoted, optionally inside a
+subscript, call or Perl hash: `os.environ["PASSWORD"]`,
+`getenv(TOKEN)`, `$ENV{TOKEN}`, or before a subscript:
+`token[i]`), optional blanks, `:` or `=` with the rest of an
+operator run (`=>` of Ruby, PHP and Perl, `:=`, `==`, also after
+blanks: `password = => s`), optional blanks and a value — a
+quoted string up to its matching unescaped quote, or an
+unquoted value: bare runs (up to white space, a quote or one of
+`,;&})]`) and bracketed groups (`{…}`, `[…]`, `(…)` up to the
+matching bracket) glued together, so `[]string{"s"}` and
+`SecretStr("s")` are masked whole — and masks only the value, so JSON,
 YAML, dicts, hashes, assignments and pairs inside shell strings
 need no parser of their own (`{"password" => "s"}` →
 `{"password" => "***"}`); the pass is linear in the element's
@@ -47,25 +59,27 @@ length. An object or array under a denied key is masked whole
 (`"secrets":***`, `"tokens":***`); under any other key its pairs
 are judged one by one. A blank escaped by a backslash stays in
 its word and its value, as a shell keeps it (`--password a\ s`
-→ `--password ***`).
+→ `--password ***`). Two forms have no key-value separator and
+are masked by their keywords, whatever the policy's lists: SQL
+statements (`[ENCRYPTED] PASSWORD 's'`, `IDENTIFIED [WITH
+plugin] BY 's'`, `SET PASSWORD FOR u = 's'`, `PASSWORD('s')`,
+Oracle's bare `IDENTIFIED BY s`; after `PASSWORD` only a quoted
+value counts, so prose stays) and Go MySQL DSNs without a scheme
+(`u:s@tcp(h)/db`, `u:s@/db`: the `@` must be followed by
+`proto(` or one `/`, so `image:tag@sha256:…` stays).
 
-It is best effort. Not recognized: a secret under an innocuous
-name (also in JSON, `{"db":"s"}`) or as a bare positional
-argument; a pair without `:` or `=` (XML,
-`<password>s</password>`; `password -> s`; `password s` in
-prose); a key written with JSON `\u` escapes; a pair whose key
-is split across argv elements or whose separator starts the
-next element (`"password"` then `:"s"`), or whose bracketed
-value opens in one element and continues in the next
-(`{"password":["x` then `s"]}`). A quoted value with spaces
+It is best effort; what it does not recognize is listed under
+[Accepted limits](#accepted-limits). A quoted value with spaces
 inside a shell string is masked up to the quote's end, as a
 shell would split it. Over-masked, never leaked: an operator
 run glued to a bare value (`password:>s`) is masked with it; a
 one-word `KEY=VALUE` under a denied key loses the rest of the
 word (`{"password"=>"s"}` → `{"password"=***`); a blank after an
 even run of backslashes, which a shell does split at, still
-counts as part of the value; and `--password-stdin` masks the
-argument after it. HTTP headers (M3) use the same package:
+counts as part of the value; `--password-stdin` and `--no-auth`
+mask the argument after them; and a quoted word after `PASSWORD`
+in prose is masked as a SQL value. HTTP headers (M3) use the
+same package:
 names containing `authorization`, `cookie`, `bearer`,
 `credential`, `token`, `secret`, `password`, `passwd`,
 `passphrase`, `session` or `signature`, names ending in `pwd` or
@@ -75,16 +89,19 @@ functions keys (`*api*key*`, `*auth*key*`, …) are recorded as
 `X-Amz-Credential`, `X-Api-Key` and `Ocp-Apim-Subscription-Key`
 are too. So are the identity headers auth proxies and clouds
 forward: names containing `jwt`, `assertion`, `oidc`,
-`userinfo`, `principal`, `csrf` or `xsrf`, ending in `otp` or
-in the word `auth`, or starting with `authentication`
+`userinfo`, `principal`, `csrf`, `xsrf`, `authentication` or
+`hmac`, or ending in `otp` or in the word `auth`
 (`X-JWT-Assertion`, `Cf-Access-Jwt-Assertion`,
 `X-Amzn-Oidc-Data`, `X-Ms-Client-Principal`, `X-Auth`,
-`Authentication-Info`). `Sec-WebSocket-Key`, `Keep-Alive`,
-`WWW-Authenticate` or `X-Forwarded-For` stay. A value is
+`Proxy-Authentication-Info`, `X-Shopify-Hmac-Sha256`), and
+`Sec-WebSocket-Protocol`, where Kubernetes clients carry a
+bearer token (`base64url.bearer.authorization.k8s.io.<token>`).
+`Sec-WebSocket-Key`, `Keep-Alive`, `WWW-Authenticate`,
+`Proxy-Authenticate` or `X-Forwarded-For` stay. A value is
 masked by its shape under any name: one holding a JWT (three
 or five dot-separated base64url parts, the first starting
 `eyJ`) or starting with `Bearer`, `Basic`, `Digest` or
-`Negotiate` and a credential after it (a `WWW-Authenticate`
+`Negotiate`, any white space and a credential (a `WWW-Authenticate`
 challenge such as `Basic realm=x` is masked too, an
 over-mask). URLs in the other headers' values and
 every query value of the path are masked; `location`,
@@ -96,3 +113,37 @@ The Java agent applies a copy of these header and query rules
 (`iormesh.agent.http.Redaction`) before a request reaches the
 spool, so a secret never lands on disk, and the tracer applies
 `internal/redact` again to every http event it writes.
+
+## The corpus
+
+`internal/redact/testdata/corpus.tsv` (task qp4) holds the real
+secret carriers the rules above are held to: options and
+environment, program flags, curl/wget/httpie/git, database
+clients, JDBC and Go DSNs, SQL, containers, Kubernetes and
+clouds, shell strings, Ruby/PHP/Perl/Python/Go/JS one-liners,
+the credential headers of proxies and identity providers, and
+URLs. Each case plants the canary `SEKRET` and says `masked` or
+`limit:<tag>`. `TestCorpus` runs every case through
+`Policy.Argv`, `Policy.Header` or `Policy.URL`, and the Java
+agent's `CorpusTest` runs the header and url cases through
+`Redaction`: a masked case fails when the canary survives, a
+limit case when it disappears — a limit that got fixed becomes
+a masked case and leaves the table below in the same change.
+`TestCorpusLimitsDocumented` fails when the table's tags and the
+corpus's differ. A new leak is a new corpus line first, then
+the rule that masks it.
+
+## Accepted limits
+
+What the denylist does not recognize, each proven by a corpus
+case that keeps its canary:
+
+| Limit | Example | Why it stays |
+|-------|---------|--------------|
+| `positional` | `redis-cli AUTH s`, `aws configure set aws_secret_access_key s`, `npm config set //r/:_authToken s`, `sqlplus scott/s@db`, `echo s \| docker login --password-stdin` | a bare argument has no key; only its place in one program's grammar marks it, which needs a new rule kind (task wp4) |
+| `innocuous-name` | `--db s`, `{"db":"s"}`, `X-Custom: s`, `X-Custom: token=s` | the name says nothing; masking every value would hide all arguments and headers |
+| `no-separator` | `<password>s</password>`, `<wsse:Password>s</wsse:Password>`, `password -> s`, `password s` | no `:` or `=` between key and value (XML, an arrow, prose); a parser per syntax is out of scope |
+| `call-argument` | `define('DB_PASSWORD', 's')`, `os.environ.setdefault("TOKEN", "s")`, `System.setProperty("db.password", "s")`, `db.auth("u", "s")` | key and value are separate arguments of a call; which argument is secret depends on the function |
+| `split-element` | `password` `:` `s` as three elements, `{"password"` then `:"s"}`, `{"password":["x` then `s"]}` | the pair is split across argv elements; only an open separator at an element's end carries over |
+| `json-escape` | `{"password":"s"}` | the key is written with JSON `\u` escapes, which the scan does not decode |
+| `path-segment` | `/reset/s`, `https://hooks.slack.com/services/T/B/s`, `https://api.telegram.org/bots/…` | path segments are recorded verbatim (decision #22: templated at the controller's aggregations, raw in the events) |

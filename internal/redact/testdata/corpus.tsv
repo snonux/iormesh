@@ -1,0 +1,264 @@
+# Redaction corpus (task qp4): real secret carriers, one case per line,
+# read by internal/redact's TestCorpus (every kind) and by the Java
+# agent's CorpusTest (the header and url kinds, which its Redaction
+# copies). Fields are separated by one TAB:
+#
+#   kind	expect	note	input...
+#
+# kind    argv (the inputs are the argv elements, through Policy.Argv),
+#         header (name and value, through Policy.Header and
+#         Redaction.header) or url (one URL or request target, through
+#         Policy.URL and Redaction.url).
+# expect  masked: the canary SEKRET must not survive.
+#         limit:<tag>: an accepted limit; the canary must survive, and
+#         <tag> must be a row of the "Accepted limits" table in
+#         docs/schema/redaction.md (TestCorpusLimitsDocumented). A
+#         limit that starts to be masked fails the test, so the line
+#         becomes a masked one and the doc is updated with it.
+# note    where the form comes from: a tool, a language, an earlier
+#         leak task (zi4, 0j4, rm4, np4, op4, qp4).
+#
+# Every input holds the canary SEKRET. "<TAB>" in an input stands for a
+# TAB character. Lines starting with '#' and blank lines are skipped.
+
+# --- options, KEY=VALUE, environment ----------------------------------
+argv	masked	option =	app	--password=SEKRET
+argv	masked	option, next element	app	--password	SEKRET
+argv	masked	single dash	app	-secret	SEKRET
+argv	masked	java -D	java	-Ddb.password=SEKRET	-jar	app.jar
+argv	masked	java truststore	java	-Djavax.net.ssl.trustStorePassword=SEKRET	Main
+argv	masked	jasypt	java	-Djasypt.encryptor.password=SEKRET	-jar	app.jar
+argv	masked	spring property	java	-jar	app.jar	--spring.datasource.password=SEKRET
+argv	masked	spring json (rm4)	java	-jar	app.jar	--spring.application.json={"db":{"password":"SEKRET"}}
+argv	masked	env prefix	env	DB_PASSWORD=SEKRET	app
+argv	masked	env spring	env	SPRING_DATASOURCE_PASSWORD=SEKRET	java	-jar	a.jar
+argv	masked	env aws	env	AWS_SECRET_ACCESS_KEY=SEKRET	aws	s3	ls
+argv	masked	env redis-cli	env	REDISCLI_AUTH=SEKRET	redis-cli	ping
+argv	masked	env npm	env	NPM_CONFIG__AUTH=SEKRET	npm	publish
+argv	masked	keytool	keytool	-list	-keystore	k.jks	-storepass	SEKRET
+argv	masked	keytool keypass	keytool	-genkey	-keypass	SEKRET
+argv	masked	openssl -pass	openssl	enc	-aes256	-pass	pass:SEKRET
+argv	masked	openssl -passin	openssl	rsa	-passin	pass:SEKRET
+argv	masked	glued colon pair	app	--api_key:SEKRET
+argv	masked	option masks a dash value	app	--token	-SEKRET
+
+# --- program-scoped flags ---------------------------------------------
+argv	masked	mysql -p	mysql	-uroot	-pSEKRET	db
+argv	masked	mysql --password	mysql	--password=SEKRET
+argv	masked	mariadb -p	mariadb	-pSEKRET
+argv	masked	sudo mysql	sudo	-u	root	mysql	-pSEKRET
+argv	masked	sshpass	sshpass	-p	SEKRET	ssh	h
+argv	masked	redis-cli -a	redis-cli	-a	SEKRET	ping
+argv	masked	redis-cli --pass	redis-cli	--user	u	--pass	SEKRET
+argv	masked	redis-cli url	redis-cli	-u	redis://:SEKRET@h:6379
+argv	masked	mongosh -p	mongosh	-u	u	-p	SEKRET
+argv	masked	mongodump -p	mongodump	--username	u	-p	SEKRET
+argv	masked	mongosh --password	mongosh	--password	SEKRET
+argv	masked	mongosh url	mongosh	mongodb+srv://u:SEKRET@c.example.net/db
+argv	masked	mongosh createUser	mongosh	--eval	db.createUser({user: "u", pwd: "SEKRET", roles: []})
+argv	masked	docker login -p	docker	login	-u	u	-p	SEKRET	registry
+argv	masked	docker login --password	docker	login	--password	SEKRET
+argv	masked	podman login	podman	login	-p	SEKRET	quay.io
+argv	masked	az login -p	az	login	--service-principal	-u	app	-p	SEKRET	--tenant	t
+argv	masked	az --password	az	login	--password	SEKRET
+argv	masked	az sas token	az	storage	blob	upload	--sas-token	SEKRET
+argv	masked	az account key	az	storage	blob	list	--account-key	SEKRET
+argv	masked	az connection string	az	storage	blob	list	--connection-string	DefaultEndpointsProtocol=https;AccountName=a;AccountKey=SEKRET;EndpointSuffix=core.windows.net
+
+# --- curl, wget, httpie, git ------------------------------------------
+argv	masked	curl -u	curl	-u	bob:SEKRET	https://h/
+argv	masked	curl --user	curl	--user	bob:SEKRET	https://h/
+argv	masked	curl --user=	curl	--user=bob:SEKRET	https://h/
+argv	masked	curl -U	curl	-U	bob:SEKRET	-x	http://proxy:3128	https://h/
+argv	masked	curl --proxy-user	curl	--proxy-user	bob:SEKRET	https://h/
+argv	masked	curl -H bearer	curl	-H	Authorization: Bearer SEKRET	https://h/
+argv	masked	curl -H api key	curl	-H	X-Api-Key: SEKRET	https://h/
+argv	masked	curl --header=	curl	--header=Cookie: sid=SEKRET	https://h/
+argv	masked	curl --oauth2-bearer	curl	--oauth2-bearer	SEKRET	https://h/
+argv	masked	curl form body (zi4)	curl	-d	grant_type=client_credentials&client_secret=SEKRET	https://h/token
+argv	masked	curl json body (rm4)	curl	-d	{"password":"SEKRET"}	https://h/
+argv	masked	curl json spaced (rm4)	curl	-d	{"user": "u", "token": "SEKRET"}	https://h/
+argv	masked	curl userinfo	curl	https://bob:SEKRET@h/
+argv	masked	curl query	curl	https://h/api?q=1&access_token=SEKRET
+argv	masked	wget --password	wget	--password=SEKRET	https://h/
+argv	masked	wget --http-password	wget	--http-user=u	--http-password=SEKRET	https://h/
+argv	masked	wget --header	wget	--header=Authorization: Basic SEKRET	https://h/
+argv	masked	httpie -a	http	-a	bob:SEKRET	https://h/
+argv	masked	httpie --auth	http	--auth	bob:SEKRET	https://h/
+argv	masked	httpie header	http	https://h/	Authorization:Bearer SEKRET
+argv	masked	httpie field	http	POST	https://h/	password=SEKRET
+argv	masked	httpie raw json field	http	POST	https://h/	password:=SEKRET
+argv	masked	git userinfo	git	clone	https://u:SEKRET@github.com/o/r
+argv	masked	git token userinfo	git	clone	https://SEKRET@github.com/o/r
+argv	masked	git extraHeader	git	-c	http.extraHeader=Authorization: Bearer SEKRET	clone	https://h/r
+
+# --- databases and DSNs -----------------------------------------------
+argv	masked	psql url	psql	postgresql://u:SEKRET@h/db
+argv	masked	psql conninfo	psql	host=h user=u password=SEKRET dbname=d
+argv	masked	psql ALTER USER (qp4)	psql	-c	ALTER USER u PASSWORD 'SEKRET'
+argv	masked	psql CREATE ROLE (qp4)	psql	-c	CREATE ROLE u LOGIN PASSWORD 'SEKRET'
+argv	masked	psql ENCRYPTED PASSWORD (qp4)	psql	-c	ALTER ROLE u WITH ENCRYPTED PASSWORD 'SEKRET'
+argv	masked	mysql IDENTIFIED BY (qp4)	mysql	-e	CREATE USER 'u'@'%' IDENTIFIED BY 'SEKRET'
+argv	masked	mysql IDENTIFIED WITH ... BY (qp4)	mysql	-e	ALTER USER u IDENTIFIED WITH mysql_native_password BY 'SEKRET'
+argv	masked	mysql SET PASSWORD FOR (qp4)	mysql	-e	SET PASSWORD FOR 'u'@'%' = 'SEKRET'
+argv	masked	mysql SET PASSWORD =	mysql	-e	SET PASSWORD = 'SEKRET'
+argv	masked	mysql PASSWORD() (qp4)	mysql	-e	SET PASSWORD FOR u = PASSWORD('SEKRET')
+argv	masked	oracle IDENTIFIED BY bare (qp4)	sqlplus	-s	/nolog	ALTER USER scott IDENTIFIED BY SEKRET
+argv	masked	jdbc postgres query	java	-Dspring.datasource.url=jdbc:postgresql://h/db?user=u&password=SEKRET
+argv	masked	jdbc mysql userinfo	java	-Durl=jdbc:mysql://u:SEKRET@h/db
+argv	masked	jdbc sqlserver (zi4)	java	-Durl=jdbc:sqlserver://h;user=u;password=SEKRET
+argv	masked	jdbc h2 (zi4)	java	-Durl=jdbc:h2:file:/d;USER=sa;PASSWORD=SEKRET
+argv	masked	jdbc oracle thin (zi4)	java	-Durl=jdbc:oracle:thin:scott/SEKRET@//db:1521/svc
+argv	masked	go dsn tcp (qp4)	app	--dsn=u:SEKRET@tcp(h:3306)/db
+argv	masked	go dsn next element (qp4)	app	-dsn	u:SEKRET@tcp(h)/db
+argv	masked	go dsn innocuous flag (qp4)	app	--db	u:SEKRET@unix(/tmp/mysql.sock)/db
+argv	masked	go dsn no address (qp4)	app	--db=u:SEKRET@/db
+argv	masked	database url env	env	DATABASE_URL=postgres://u:SEKRET@h/db	app
+argv	masked	libpq kv in option	app	--db=host=h password=SEKRET
+
+# --- containers, kubernetes, clouds -----------------------------------
+argv	masked	docker -e	docker	run	-e	DB_PASSWORD=SEKRET	img
+argv	masked	docker --env=	docker	run	--env=API_TOKEN=SEKRET	img
+argv	masked	docker build-arg	docker	build	--build-arg	NPM_TOKEN=SEKRET	.
+argv	masked	kubectl from-literal	kubectl	create	secret	generic	db	--from-literal=password=SEKRET
+argv	masked	kubectl --token	kubectl	--token=SEKRET	get	pods
+argv	masked	kubectl docker-password	kubectl	create	secret	docker-registry	r	--docker-password=SEKRET
+argv	masked	kubectl exec sh -c	kubectl	exec	pod	--	sh	-c	mysql -uroot -pSEKRET
+argv	masked	helm --set	helm	install	r	c	--set	db.password=SEKRET
+argv	masked	helm --set=	helm	install	r	c	--set=auth.rootPassword=SEKRET
+argv	masked	helm repo add	helm	repo	add	r	https://h	--username	u	--password	SEKRET
+argv	masked	vault kv put	vault	kv	put	secret/db	password=SEKRET
+argv	masked	gh secret --body	gh	secret	set	NAME	--body	SEKRET
+
+# --- shell strings ----------------------------------------------------
+argv	masked	sh -c mysql	sh	-c	mysql -uroot -pSEKRET db
+argv	masked	sh -c export	bash	-c	export DB_PASSWORD=SEKRET; ./run
+argv	masked	sh -c env prefix	sh	-c	PGPASSWORD=SEKRET psql -h h
+argv	masked	sh -c curl -H single	bash	-c	curl -H 'Authorization: Bearer SEKRET' https://h/
+argv	masked	sh -c curl -H double	bash	-c	curl -H "X-Api-Key: SEKRET" https://h/
+argv	masked	sh -c escaped blank (op4)	sh	-c	run --password a\ SEKRET
+argv	masked	sh -c quoted value	sh	-c	run --password "a SEKRET"
+argv	masked	sh -c nested sudo	sh	-c	sudo -u root sh -c "mysql -pSEKRET"
+argv	masked	sh -c redis-cli -a	sh	-c	redis-cli -a SEKRET ping
+argv	masked	sh -c escaped json (rm4)	sh	-c	curl -d "{\"token\":\"SEKRET\"}" h
+argv	masked	sh -c psql ALTER (qp4)	sh	-c	psql -c "ALTER USER u PASSWORD 'SEKRET'"
+argv	masked	sh -c form body	sh	-c	curl -d 'a=b&secret=SEKRET' h
+argv	masked	space before value (op4)	sh	-c	password =SEKRET
+
+# --- languages --------------------------------------------------------
+argv	masked	ruby hash rocket (op4)	ruby	-e	h = {"password" => "SEKRET"}
+argv	masked	ruby symbol key	ruby	-e	h = {password: "SEKRET"}
+argv	masked	ruby symbol rocket	ruby	-e	h = {:password => "SEKRET"}
+argv	masked	php array	php	-r	$a = ['password' => 'SEKRET'];
+argv	masked	perl hash	perl	-e	my %h = (password => 'SEKRET');
+argv	masked	perl %ENV (qp4)	perl	-e	$ENV{PASSWORD} = 'SEKRET';
+argv	masked	python assign	python3	-c	password = "SEKRET"
+argv	masked	python environ (op4)	python3	-c	os.environ["API_TOKEN"] = "SEKRET"
+argv	masked	python kwarg	python3	-c	connect(host="h", password="SEKRET")
+argv	masked	python dict	python3	-c	print({'secret': 'SEKRET'})
+argv	masked	go short assign	sh	-c	password := "SEKRET"
+argv	masked	go slice literal (qp4)	sh	-c	passwords := []string{"SEKRET"}
+argv	masked	go conversion (qp4)	sh	-c	token := []byte("SEKRET")
+argv	masked	subscript index (qp4)	sh	-c	token[i] = SEKRET
+argv	masked	subscript number (qp4)	sh	-c	secrets[0] = SEKRET
+argv	masked	js object	node	-e	f({apiKey: 'SEKRET'})
+argv	masked	js assignment	node	-e	process.env.API_TOKEN = 'SEKRET'
+argv	masked	yaml pair	app	--config	password: SEKRET
+argv	masked	operator after blank (op4)	ruby	-e	password = => SEKRET
+
+# --- accepted limits --------------------------------------------------
+argv	limit:positional	redis AUTH takes the password as a command word	redis-cli	AUTH	SEKRET
+argv	limit:positional	redis AUTH in a shell string	sh	-c	redis-cli -h h AUTH default SEKRET
+argv	limit:positional	aws configure set KEY VALUE	aws	configure	set	aws_secret_access_key	SEKRET
+argv	limit:positional	npm config set KEY VALUE	npm	config	set	//registry.npmjs.org/:_authToken	SEKRET
+argv	limit:positional	sqlplus user/password@db	sqlplus	scott/SEKRET@orcl
+argv	limit:positional	piped to --password-stdin	sh	-c	echo SEKRET | docker login -u u --password-stdin
+argv	limit:innocuous-name	a secret under a name the denylist does not know	app	--db	SEKRET
+argv	limit:innocuous-name	json under an innocuous key	app	{"db":"SEKRET"}
+argv	limit:no-separator	XML element	curl	-d	<password>SEKRET</password>	h
+argv	limit:no-separator	WS-Security XML	curl	-d	<wsse:Password>SEKRET</wsse:Password>	h
+argv	limit:no-separator	arrow is no separator	app	password -> SEKRET
+argv	limit:no-separator	prose	app	password SEKRET
+argv	limit:call-argument	php define	php	-r	define('DB_PASSWORD', 'SEKRET');
+argv	limit:call-argument	python setdefault	python3	-c	os.environ.setdefault("API_TOKEN", "SEKRET")
+argv	limit:call-argument	java setProperty	jshell	-R	System.setProperty("db.password", "SEKRET")
+argv	limit:call-argument	mongosh db.auth	mongosh	--eval	db.auth("u", "SEKRET")
+argv	limit:split-element	key, separator and value as three elements	app	password	:	SEKRET
+argv	limit:split-element	separator starts the next element	app	{"password"	:"SEKRET"}
+argv	limit:split-element	bracketed value continues in the next element	app	{"password":["x	SEKRET"]}
+argv	limit:json-escape	key written with \u escapes	app	{"pass\u0077ord":"SEKRET"}
+
+# --- headers ----------------------------------------------------------
+header	masked	authorization bearer	Authorization	Bearer SEKRET
+header	masked	authorization basic	Authorization	Basic SEKRET
+header	masked	authorization digest	Authorization	Digest username="u", response="SEKRET"
+header	masked	authorization negotiate	Authorization	Negotiate SEKRET
+header	masked	authorization token (DRF)	Authorization	Token SEKRET
+header	masked	aws sigv4	Authorization	AWS4-HMAC-SHA256 Credential=AKIA/x, Signature=SEKRET
+header	masked	proxy authorization	Proxy-Authorization	Basic SEKRET
+header	masked	proxy authentication info (np4)	Proxy-Authentication-Info	nextnonce="SEKRET"
+header	masked	authentication info	Authentication-Info	nextnonce="SEKRET"
+header	masked	cookie	Cookie	sid=SEKRET
+header	masked	set-cookie	Set-Cookie	sid=SEKRET; Path=/; HttpOnly
+header	masked	cookie2 (0j4)	Cookie2	sid=SEKRET
+header	masked	api key (0j4)	X-Api-Key	SEKRET
+header	masked	auth token	X-Auth-Token	SEKRET
+header	masked	auth key (0j4)	X-Auth-Key	SEKRET
+header	masked	amz security token	X-Amz-Security-Token	SEKRET
+header	masked	amz credential (0j4)	X-Amz-Credential	SEKRET
+header	masked	azure apim key (0j4)	Ocp-Apim-Subscription-Key	SEKRET
+header	masked	azure functions key (0j4)	X-Functions-Key	SEKRET
+header	masked	azure easyauth id token	X-Ms-Token-Aad-Id-Token	SEKRET
+header	masked	azure easyauth principal (np4)	X-Ms-Client-Principal	SEKRET
+header	masked	google iap (np4)	X-Goog-Iap-Jwt-Assertion	SEKRET
+header	masked	cloud endpoints forwarded authorization (0j4)	X-Forwarded-Authorization	Bearer SEKRET
+header	masked	cloud run serverless authorization	X-Serverless-Authorization	Bearer SEKRET
+header	masked	cloudflare access jwt (np4)	Cf-Access-Jwt-Assertion	SEKRET
+header	masked	cloudflare access client secret	Cf-Access-Client-Secret	SEKRET
+header	masked	alb oidc data (np4)	X-Amzn-Oidc-Data	SEKRET
+header	masked	alb oidc access token	X-Amzn-Oidc-Accesstoken	SEKRET
+header	masked	oauth2-proxy access token	X-Forwarded-Access-Token	SEKRET
+header	masked	oauth2-proxy auth request token	X-Auth-Request-Access-Token	SEKRET
+header	masked	nginx auth_request upstream (np4)	X-Upstream-Auth	SEKRET
+header	masked	envoy/istio jwt payload	X-Jwt-Payload	SEKRET
+header	masked	wso2 jwt assertion (np4)	X-JWT-Assertion	SEKRET
+header	masked	kong userinfo (np4)	X-Userinfo	SEKRET
+header	masked	docker registry auth	X-Registry-Auth	SEKRET
+header	masked	vault token	X-Vault-Token	SEKRET
+header	masked	gitlab private token	Private-Token	SEKRET
+header	masked	csrf token (np4)	X-Csrf-Token	SEKRET
+header	masked	xsrf token (np4)	X-Xsrf-Token	SEKRET
+header	masked	otp (np4)	X-Otp	SEKRET
+header	masked	github webhook signature	X-Hub-Signature-256	sha256=SEKRET
+header	masked	stripe signature	Stripe-Signature	t=1,v1=SEKRET
+header	masked	shopify webhook hmac (qp4)	X-Shopify-Hmac-Sha256	SEKRET
+header	masked	kubernetes websocket bearer (qp4)	Sec-WebSocket-Protocol	base64url.bearer.authorization.k8s.io.SEKRET, base64.binary.k8s.io
+header	masked	jwt under any name (np4)	X-Custom	eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SEKRET
+header	masked	jwt in a cookie-like value (np4)	X-Custom	jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJTRUtSRVQifQ.SEKRET; Path=/
+header	masked	bearer under any name (np4)	X-Custom	Bearer SEKRET
+header	masked	tab after bearer (np4)	X-Custom	Bearer<TAB>SEKRET
+header	masked	tab after basic (np4)	X-Custom	Basic<TAB>SEKRET
+header	masked	referer query	Referer	https://h/cb?code=SEKRET
+header	masked	referer userinfo	Referer	https://u:SEKRET@h/
+header	masked	location fragment	Location	/cb#access_token=SEKRET
+header	masked	forward-auth original uri (0j4)	X-Original-URI	/login?token=SEKRET
+header	masked	traefik forwarded uri (0j4)	X-Forwarded-Uri	/x?t=SEKRET
+header	masked	envoy original path (0j4)	X-Envoy-Original-Path	/x?t=SEKRET
+header	masked	link header url	Link	<https://h/p?token=SEKRET>; rel="next"
+header	limit:innocuous-name	a custom header the denylist does not know	X-Custom	SEKRET
+header	limit:innocuous-name	a pair inside a custom header	X-Custom	token=SEKRET
+
+# --- URLs and request targets -----------------------------------------
+url	masked	query	/login?user=u&password=SEKRET
+url	masked	any query value	/search?q=SEKRET
+url	masked	userinfo	https://u:SEKRET@h/
+url	masked	lone userinfo	https://SEKRET@h/
+url	masked	'/' in a password	https://u:p/SEKRET@h/x
+url	masked	matrix parameter	/a;jsessionid=SEKRET
+url	masked	fragment	https://h/cb#access_token=SEKRET
+url	masked	jdbc sqlserver	jdbc:sqlserver://h;user=u;password=SEKRET
+url	masked	s3 presigned	/bucket/key?X-Amz-Credential=a&X-Amz-Signature=SEKRET
+url	masked	encoded name	/x?pass%77ord=SEKRET
+url	limit:path-segment	a token in the path	/reset/SEKRET
+url	limit:path-segment	slack webhook	https://hooks.slack.com/services/T0/B0/SEKRET
+url	limit:path-segment	telegram bot token	https://api.telegram.org/botSEKRET/sendMessage

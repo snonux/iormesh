@@ -22,12 +22,14 @@ func (p Policy) credentialValue(value string) bool {
 
 // authCredential reports a value whose first word is one of AuthSchemes
 // (any case) with something after it: "Bearer abc" but not "Bearer" alone
-// or "Basically fine".
+// or "Basically fine". Any white space ends the scheme word, a TAB too
+// ("Bearer\tabc", task qp4).
 func (p Policy) authCredential(value string) bool {
-	scheme, rest, ok := strings.Cut(strings.TrimSpace(value), " ")
-	if !ok || strings.TrimSpace(rest) == "" {
+	words := strings.Fields(value)
+	if len(words) < 2 {
 		return false
 	}
+	scheme := words[0]
 	for _, s := range p.AuthSchemes {
 		if strings.EqualFold(scheme, s) {
 			return true
