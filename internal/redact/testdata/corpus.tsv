@@ -181,6 +181,11 @@ argv	masked	pnpm config set	pnpm	config	set	//npm.pkg.github.com/:_authToken	SEK
 argv	masked	npm config set in a shell string	sh	-c	npm config set //r/:_authToken SEKRET && npm ci
 argv	masked	npm config set key=value	npm	config	set	//r/:_authToken=SEKRET
 argv	masked	poetry config KEY VALUE	poetry	config	pypi-token.pypi	SEKRET
+argv	masked	poetry config http-basic user password	poetry	config	http-basic.pypi	u	SEKRET
+argv	masked	composer config http-basic user password	composer	config	http-basic.repo.example.com	u	SEKRET
+argv	masked	aws configure set, option and value before the key	aws	configure	set	--profile	p	aws_secret_access_key	SEKRET
+argv	masked	npm config set, option= before the key	npm	config	set	--location=global	//r/:_authToken	SEKRET
+argv	masked	npm config set, flag before the key	npm	config	set	-g	//r/:_authToken	SEKRET
 argv	masked	dotnet user-secrets set	dotnet	user-secrets	set	Stripe:SecretKey	SEKRET
 argv	masked	sqlplus user/password@db	sqlplus	scott/SEKRET@orcl
 argv	masked	sqlplus user/password	sqlplus	-S	scott/SEKRET	@report.sql
@@ -189,7 +194,12 @@ argv	masked	sqlplus as sysdba in one element	sqlplus	sys/SEKRET@orcl as sysdba
 argv	masked	sqlplus in a shell string	sh	-c	sqlplus -s "scott/SEKRET@orcl" @a.sql
 
 # --- accepted limits --------------------------------------------------
-argv	limit:stdin	piped to --password-stdin, never in argv	sh	-c	echo SEKRET | docker login -u u --password-stdin
+argv	limit:stdin	echo piped to --password-stdin: only the pipe marks it	sh	-c	echo SEKRET | docker login -u u --password-stdin
+argv	limit:stdin	redis AUTH piped to redis-cli	sh	-c	echo "AUTH SEKRET" | redis-cli
+argv	limit:positional	sqlplus password quoted with a blank	sqlplus	scott/"x SEKRET"@orcl
+argv	limit:positional	rman logon, no rule for rman	rman	target	sys/SEKRET@orcl
+argv	limit:positional	expdp logon, no rule for expdp	expdp	scott/SEKRET@orcl	directory=d
+argv	limit:positional	kubectl config set, no rule for kubectl	kubectl	config	set	users.u.token	SEKRET
 argv	limit:innocuous-name	a secret under a name the denylist does not know	app	--db	SEKRET
 argv	limit:innocuous-name	json under an innocuous key	app	{"db":"SEKRET"}
 argv	limit:no-separator	XML element	curl	-d	<password>SEKRET</password>	h

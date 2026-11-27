@@ -24,6 +24,19 @@ func TestArgvPositionalRules(t *testing.T) {
 		{[]string{"sqlplus", `scott/"p@ss"@//db:1521/svc`}, []string{"sqlplus", "scott/***@//db:1521/svc"}},
 		{[]string{"sh", "-c", `sqlplus -s "scott/pw" @a.sql`},
 			[]string{"sh", "-c", `sqlplus -s "scott/***" @a.sql`}},
+		// Options before the key are skipped, with a value or without.
+		{[]string{"aws", "configure", "set", "--profile", "p", "aws_session_token", "pw"},
+			[]string{"aws", "configure", "set", "--profile", "p", "aws_session_token", "***"}},
+		{[]string{"npm", "config", "set", "-g", "--location=global", "_auth", "pw"},
+			[]string{"npm", "config", "set", "-g", "--location=global", "_auth", "***"}},
+		{[]string{"poetry", "config", "http-basic.pypi", "u", "pw"},
+			[]string{"poetry", "config", "http-basic.pypi", "***", "***"}},
+		// Documented over-masks: any "set" after aws, a script's path
+		// argument after sqlplus.
+		{[]string{"aws", "s3", "cp", "set", "token.txt", "s3://b/"},
+			[]string{"aws", "s3", "cp", "set", "token.txt", "***"}},
+		{[]string{"sqlplus", "u/pw@db", "@run.sql", "in/data.csv"},
+			[]string{"sqlplus", "u/***@db", "@run.sql", "in/***"}},
 	}
 	for _, c := range cases {
 		if got := Default().Argv(c.in); !slices.Equal(got, c.want) {
@@ -44,6 +57,9 @@ func TestArgvPositionalKeepsBenignArgs(t *testing.T) {
 		{"aws", "configure", "get", "region"},
 		{"aws", "configure", "set", "region", "eu-west-1"},
 		{"npm", "config", "set", "color", "false"},
+		{"npm", "config", "set", "-g", "color", "false"},
+		{"aws", "configure", "set", "--profile", "p", "region", "eu-west-1"},
+		{"poetry", "config", "virtualenvs.in-project", "true"},
 		{"git", "config", "set", "user.name", "bob"}, // no rule for git
 		{"sqlplus", "/nolog"},
 		{"sqlplus", "/", "as", "sysdba"},

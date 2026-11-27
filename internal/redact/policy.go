@@ -30,7 +30,7 @@ type FlagRule struct {
 	Program string
 	Flag    string
 	Kind    RuleKind
-	Verb    string // the command word of a VerbArgs or VerbKeyValue rule
+	Verb    string // a VerbArgs or VerbKeyValue rule's command word, a glob
 	Args    int    // how many words after Verb a VerbArgs rule masks
 }
 
@@ -165,7 +165,7 @@ type argvState struct {
 	maskNext  bool
 	progs     []string // lower-cased basenames of program words FlagRules name
 	maskWords int      // words still to mask after a VerbArgs verb or a denied key
-	keyNext   bool     // the next word is the key after a VerbKeyValue verb
+	keyWords  int      // words that may still be the key after a VerbKeyValue verb
 }
 
 // Argv returns argv with every secret masked; argv itself is not modified.
@@ -230,15 +230,13 @@ func (p Policy) word(st *argvState, arg string) string {
 	if st.maskWords > 0 {
 		st.maskWords--
 	}
-	keyWord := st.keyNext
-	st.keyNext = false
 	out, next := p.argvElem(st, arg)
 	st.maskNext = next
 	if masked {
 		return Mask
 	}
 	p.see(st, arg)
-	p.positional(st, arg, keyWord)
+	p.positional(st, arg)
 	return out
 }
 

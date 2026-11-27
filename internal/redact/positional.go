@@ -17,15 +17,19 @@ type RuleKind int
 const (
 	// FlagValue masks the value of the option Flag (see FlagRule).
 	FlagValue RuleKind = iota
-	// VerbArgs masks the Args words after the command word Verb, matched
-	// in any case: redis-cli's "AUTH [user] password". The word count
-	// tells which word is the password, and a word-by-word pass cannot
-	// look ahead, so the username of the two-word form is masked too.
+	// VerbArgs masks the Args words after the command word Verb, a glob
+	// matched in any case: redis-cli's "AUTH [user] password", poetry's
+	// and composer's "config http-basic.<repo> user password". The word
+	// count tells which word is the password, and a word-by-word pass
+	// cannot look ahead, so the username is masked too.
 	VerbArgs
 	// VerbKeyValue reads the word after the command word Verb as a key
 	// and masks the word after the key when ArgvDeny denies it: "aws
 	// configure set aws_secret_access_key x", "npm config set
-	// //r/:_authToken x". "npm config set color false" stays.
+	// //r/:_authToken x". "npm config set color false" stays. Options
+	// between the verb and the key are skipped (see keyCandidate). The
+	// verb counts wherever it stands after the program, so "aws s3 cp set
+	// token.txt dst" masks dst: an over-mask, never a leak.
 	VerbKeyValue
 	// Logon masks the password of an Oracle logon word,
 	// "user/password[@connect]" (sqlplus scott/x@db → scott/***@db); see
@@ -37,10 +41,13 @@ const (
 // task wp4). The VerbKeyValue programs are those whose "set" command
 // takes credential keys the argv denylist names: aws configure set, npm,
 // yarn and pnpm config set (and npm set), poetry config (no "set" word:
-// poetry config pypi-token.pypi x) and dotnet user-secrets set.
+// poetry config pypi-token.pypi x) and dotnet user-secrets set; poetry
+// and composer also take HTTP basic credentials as two bare words.
 func defaultPositionalRules() []FlagRule {
 	return []FlagRule{
 		{Program: "redis-cli", Kind: VerbArgs, Verb: "auth", Args: 2},
+		{Program: "poetry", Kind: VerbArgs, Verb: "http-basic.*", Args: 2},
+		{Program: "composer", Kind: VerbArgs, Verb: "http-basic.*", Args: 2},
 		{Program: "aws", Kind: VerbKeyValue, Verb: "set"},
 		{Program: "npm", Kind: VerbKeyValue, Verb: "set"},
 		{Program: "yarn", Kind: VerbKeyValue, Verb: "set"},
@@ -61,27 +68,50 @@ func ruleApplies(progs []string, r FlagRule) bool {
 }
 
 // positional updates st after the unmasked word arg for the word after
-// it: a denied key that a VerbKeyValue verb announced masks its value,
-// and a command word of a rule in scope announces what follows it.
-// keyWord says that arg is such a key. Quotes around arg are dropped, as
-// see does, for a word cut out of a nested shell string.
-func (p Policy) positional(st *argvState, arg string, keyWord bool) {
+// it: a word that may be the key a VerbKeyValue verb announced is judged
+// as one (see keyCandidate), and a command word of a rule in scope
+// announces what follows it — a key that is not denied may still be one
+// ("poetry config http-basic.pypi u x"). Quotes around arg are dropped,
+// as see does, for a word cut out of a nested shell string.
+func (p Policy) positional(st *argvState, arg string) {
 	word := strings.Trim(arg, `'"`)
-	if keyWord && denied(p.ArgvDeny, optionKey(word)) {
-		st.maskWords = 1
-		return
+	if st.keyWords > 0 {
+		p.keyCandidate(st, word)
+		if st.maskWords > 0 {
+			return
+		}
 	}
+	lower := strings.ToLower(word)
 	for _, r := range p.FlagRules {
-		if r.Verb == "" || !strings.EqualFold(r.Verb, word) || !ruleApplies(st.progs, r) {
+		if r.Verb == "" || !globMatch(strings.ToLower(r.Verb), lower) || !ruleApplies(st.progs, r) {
 			continue
 		}
 		switch r.Kind {
 		case VerbArgs:
 			st.maskWords = r.Args
 		case VerbKeyValue:
-			st.keyNext = true
+			st.keyWords = 1
 		}
 		return
+	}
+}
+
+// keyCandidate judges word, which may be the key after a VerbKeyValue
+// verb. An option is skipped: one with "=" ("--location=global") is
+// whole, one without ("--profile", "-g") may take the next word as its
+// value, so the key may be either of the next two words. Any other word
+// uses up a candidate, and a denied one masks the word after it.
+func (p Policy) keyCandidate(st *argvState, word string) {
+	if strings.HasPrefix(word, "-") {
+		if !strings.Contains(word, "=") {
+			st.keyWords = 2
+		}
+		return
+	}
+	st.keyWords--
+	if denied(p.ArgvDeny, optionKey(word)) {
+		st.keyWords = 0
+		st.maskWords = 1
 	}
 }
 
