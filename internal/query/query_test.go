@@ -3,6 +3,7 @@ package query
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"os"
@@ -388,5 +389,48 @@ func TestFileBaseMatch(t *testing.T) {
 				t.Errorf("FileBaseMatch %q, want %q", st.FileBaseMatch, tc.want)
 			}
 		})
+	}
+}
+
+// TestRunFrames: with Input.Frames set (-frames, decision #42, task
+// an4) every event with a Java stack ends in java_frames, its stack's
+// frames in order, an id its session's tables lack as method#<id>, and
+// the rest of the line is the event's own encoding; events without a
+// stack, and every line when Frames is nil, are unchanged.
+func TestRunFrames(t *testing.T) {
+	in := fixture(t)
+	in.Frames = map[string]map[uint64]string{
+		"shop/app1/s": {7: "a.B#c(B.java:1)", 8: "a.B#<init>(B.java:2)"},
+		"shop/app2/s": {9: "other.Session#x(X.java:9)"},
+	}
+	plain := strings.Split(runOK(t, fixture(t), Filter{Host: "app1"}, 1<<20), "\n")
+	got := strings.Split(runOK(t, in, Filter{Host: "app1"}, 1<<20), "\n")
+	if len(got) != len(plain) {
+		t.Fatalf("%d lines, want %d", len(got), len(plain))
+	}
+	want := map[int]string{
+		1: `"java_frames":["a.B#c(B.java:1)","a.B#\u003cinit\u003e(B.java:2)"]}`,
+		4: `"java_frames":["method#9"]}`,
+		6: `"java_frames":["a.B#\u003cinit\u003e(B.java:2)"]}`,
+		9: `"java_frames":["a.B#c(B.java:1)"]}`,
+	}
+	for i := range got {
+		suffix, ok := want[i]
+		if !ok {
+			if got[i] != plain[i] {
+				t.Errorf("line %d changed:\n%s\nwant\n%s", i+1, got[i], plain[i])
+			}
+			continue
+		}
+		head := strings.TrimSuffix(plain[i], "}") + ","
+		if got[i] != head+suffix {
+			t.Errorf("line %d:\n%s\nwant\n%s", i+1, got[i], head+suffix)
+		}
+		var line struct {
+			JavaFrames []string `json:"java_frames"`
+		}
+		if err := json.Unmarshal([]byte(got[i]), &line); err != nil || len(line.JavaFrames) == 0 {
+			t.Errorf("line %d: %v, frames %v", i+1, err, line.JavaFrames)
+		}
 	}
 }

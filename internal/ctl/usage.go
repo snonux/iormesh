@@ -46,7 +46,7 @@ const usageSynopsis = `usage:
                    [-window-segments] [-host GLOB] [-app GLOB] [-thread GLOB]
                    [-conn ID [-follow]] [-file GLOB] [-method GLOB] [-ref REF]
                    [-event KIND] [-pid PID]
-                   [-errno NAME|N] [-otel-trace ID] [-max-bytes N]
+                   [-errno NAME|N] [-otel-trace ID] [-frames] [-max-bytes N]
   iormeshctl services [list] [-db FILE] [-project NAME] [-paths]
   iormeshctl services edges [-db FILE] [-project NAME] [-from NAME]
   iormeshctl services name [-db FILE] [-port N] HOST-GLOB SERVICE
@@ -145,7 +145,11 @@ only them. Filters AND; -event takes a schema kind, -errno a Linux errno
 name or number, -otel-trace a W3C trace id. The GLOBs are Go path.Match
 patterns: '*' stops at '/', so -file matches the whole path
 ('/tmp/*/billing.crt', not '*billing.crt*'); a -file glob that matched
-no path but a path's last element says so on stderr.
+no path but a path's last element says so on stderr. java.stack holds
+method ids; -frames ends each line with a Java stack in java_frames, its
+frames (class#method(file:line), innermost first) from the methods tables,
+an id they lack as method#ID; such a line is a schema event plus that one
+member.
 `
 
 // usagePods is the paragraph on Kubernetes targets (docs/milestones.md M7).

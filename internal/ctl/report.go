@@ -27,16 +27,18 @@ import (
 // reportFileName is the rollup in a build's output directory.
 const reportFileName = "report.json"
 
-// errMethodsCap marks a methods table left out because the build's
-// method rows would exceed maxMethodIDs.
-var errMethodsCap = fmt.Errorf("methods table left out: the build's method rows exceed %d", maxMethodIDs)
+// errMethodsCap marks a methods table left out because the method rows
+// read — by build's rollup, or by query -frames (decision #42) — would
+// exceed maxMethodIDs.
+var errMethodsCap = fmt.Errorf("methods table left out: the method rows read exceed %d", maxMethodIDs)
 
 // loadMethodTables reads every methods table of the loaded sessions,
 // each checked in the memory-capped child first and its footer held to
 // its name and place, keyed by federate session. A table that fails —
 // or would take the rows past maxMethodIDs, so a hostile server cannot
 // grow the build's memory through it — joins segs.Bad whole: its
-// session's I/O then names no method, and the build exits 1 saying so.
+// session's I/O then names no method, and the build (or query -frames,
+// whose ids then print bare) exits 1 saying so.
 func loadMethodTables(ctx context.Context, segs *federate.Segments) (map[string]map[uint64]schema.Method, error) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -50,7 +52,9 @@ func loadMethodTables(ctx context.Context, segs *federate.Segments) (map[string]
 	out := map[string]map[uint64]schema.Method{}
 	n := 0
 	for _, t := range segs.TableFiles {
-		if t.File.Table != segment.TableMethods || !sessions[t.Session()] {
+		// A table an earlier read already left out (query's -method,
+		// before -frames) is named once, not twice.
+		if t.File.Table != segment.TableMethods || !sessions[t.Session()] || isBad(segs.Bad, t.Name()) {
 			continue
 		}
 		rows := map[uint64]schema.Method{}

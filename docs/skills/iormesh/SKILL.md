@@ -31,7 +31,7 @@ Ask the user these, in one message, before anything else:
    that everything you read is sent to your model provider.
 6. **Mode:** automatic or guided (below).
 
-Write the answers down as a short list and show it back. Contact
+Write the answers as a short list and show it back. Contact
 only the hosts and URLs on that list.
 
 **Modes:**
@@ -121,8 +121,8 @@ Notes:
   ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
 - Name services before reading; `show edges` shows names
   ([ch. 6](../../guide/06-collect-build.md#name-your-services)).
-- Full stack: `show sequence ID -json`
-  ([ch. 7](../../guide/07-read-the-mesh.md#one-conversation-show-sequence)).
+- Full stack: `show sequence ID -json` or `query -frames`
+  ([ch. 8](../../guide/08-java-query.md#from-a-step-to-its-raw-events-query)).
 - `query -file` globs match whole paths
   ([ch. 8](../../guide/08-java-query.md#from-a-step-to-its-raw-events-query)).
 - Use `-apply` on bootstrap only when the SSH user has sudo
@@ -181,5 +181,5 @@ and those hosts** (the explanation is enough when it names them):
    without the user's yes for each new host.
 4. **No secrets in output.** Never print passwords or secret keys;
    never copy the secret key; never put it inside a repository.
-5. **Stop on surprise.** When an output does not match the guide's
+5. **Stop on surprise.** When output does not match the guide's
    checkpoint, stop, quote it and ask.
