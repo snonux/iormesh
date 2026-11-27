@@ -34,3 +34,5 @@ Each part is its own file; open only the one you need.
   and uses iormesh, #41 a `-file` glob that matches only a last
   element says so, #42 `query -frames` names a Java stack's
   frames.
+- [Redaction](decided/redaction.md) — #44 positional secrets are
+  masked by per-program rules (under open #9 and #22).

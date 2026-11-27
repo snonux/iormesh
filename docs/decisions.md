@@ -38,6 +38,7 @@ then open only the part you need.
   - [Container ids, pre-session connections, docs and
     agents](decisions/decided/tracing-docs-agents.md) — #34–#37,
     #41, #42.
+  - [Redaction](decisions/decided/redaction.md) — #44.
 - [Open — built on the default](decisions/open.md) — open questions raised for
   M2, M3 and M4, each with the default built.
   - [Open — raised for M2 (built on the
@@ -124,4 +125,4 @@ next free number is #45.
 - **#43** [A one-sided connection in a build's tail is pending, not
   unresolved](decisions/decided/storage-transport.md) — decided
 - **#44** [Positional secrets: per-program
-  rules](decisions/open.md) — decided
+  rules](decisions/decided/redaction.md) — decided

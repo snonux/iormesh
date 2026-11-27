@@ -187,36 +187,10 @@ Part of [Decisions](../decisions.md).
   Every `/proc` command line read for an event (this one, an
   exec's completion) is bounded at 64 KiB, its cut last element
   masked, so no event line nears the readers' 1 MiB cap.
-- **#44 Positional secrets: per-program rules** — decided
-  (owner, 2026-11-27, task wp4), under #9 and #22. Some secrets
-  are bare words whose meaning comes only from one program's
-  grammar: `redis-cli AUTH [user] s`, `aws configure set
-  aws_secret_access_key s`, `npm config set //r/:_authToken s`,
-  `sqlplus scott/s@db`. Task qp4's corpus kept them as the
-  `positional` limit. *Decided: a small set of program-specific
-  positional rules, kinds of the existing program-scoped
-  `FlagRule`*: a command word of a program masks the words
-  after it (redis-cli's `AUTH`, any case, one or two arguments,
-  so both words are masked — the count says which is the
-  password, and a word-by-word pass cannot look ahead); a
-  `config set`-style command word masks the value after its key
-  only when the argv denylist denies that key (aws `configure
-  set`, npm/yarn/pnpm `config set` and `npm set`, `poetry
-  config`, `dotnet user-secrets set`); an Oracle
-  logon word `user/password[@connect]` of sqlplus has its
-  password masked (`/nolog`, `/`, `@script.sql`, options and
-  `KEY=VALUE` words are no logon). They apply wherever the
-  flag rules do: after a wrapper, inside shell strings. Reasons:
-  each rule needs a program word before it, so it costs nothing
-  elsewhere; a denied key keeps `config set color false` and
-  `configure get region` readable. Rejected: a broad "a bare
-  denied word masks the word after it" rule — it would mask
-  whatever follows `cat password.txt`, and every argument after
-  a file or key named like a secret, while still missing AUTH
-  (not a denied word) and sqlplus (no key at all). A secret
-  piped to stdin (`echo s | docker login --password-stdin`) is
-  an argument of `echo`, marked only by the pipe, and stays an
-  accepted limit (`stdin`).
+  Secrets that are bare words of one program's grammar
+  (`redis-cli AUTH s`, `sqlplus scott/s@db`) are masked by the
+  per-program rules of decision #44
+  ([decided/redaction.md](decided/redaction.md)).
 
 
 ## Open — raised for M3 (built on the default)
