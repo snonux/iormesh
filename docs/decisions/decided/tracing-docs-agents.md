@@ -211,7 +211,17 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
     did not name fails the run, however good its answers. In
     guided mode the agent has no shell; the harness types
     exactly the commands the agent named, on the named host,
-    and pastes back the output.
+    and pastes back the output. *Amended (task bn4,
+    2026-11-27):* a command is named only by a Commands item
+    that holds it alone; an item with prose besides its command
+    names none, and one with the prose the harness spots (a
+    typographic dash, "only if/when …", "if needed/necessary")
+    gets `change`. In the rerun (task 8n4)
+    glm-5.3-flash's approved item read `sudo dnf install -y tar
+    — only if command 1 shows no tar`; it then ran the bare
+    command, which no item named, and in guided mode the user
+    would have typed the prose into dnf. The skill says the same:
+    a command that depends on an earlier output is a new step.
   - **Budget and score:** 150 agent turns (one model reply,
     with or without a tool call; the scripted user's replies
     are not turns) and 60 minutes of wall time per run; past
@@ -295,3 +305,36 @@ Part of [Decided](../decided.md), in [Decisions](../../decisions.md).
   too, and the hint would then guess; an error exit — the
   query is valid and a script would read the miss as a
   failure.
+- **#42 `query -frames` names a Java stack's frames** — task an4
+  (2026-11-27), from #37's rerun (task 8n4): `query -file
+  '/tmp/*/billing.crt'` showed billing's unlink on thread `main`
+  with `java.stack` as method ids only; `main` is in no
+  conversation, so `show sequence -json`, the one place the guide
+  named for frames, did not hold it, and both agents grepped `show
+  report` instead, two to four turns each. Query gains `-frames`:
+  each line whose event has a stack ends in `java_frames`, the
+  frame text of each id (`class#method(file:line)`, innermost
+  first, the stack's order) from the session's methods tables,
+  read as build's rollup reads them (each checked in the child,
+  capped at 2²⁰ rows, a damaged table left out, named, exit 1),
+  and `method#ID` for an id they lack, as the view model names
+  one. The member is appended after the event's own, so the rest
+  of the line stays byte for byte the event's canonical encoding;
+  `-frames` selects nothing. Without the flag the output is
+  unchanged. The guide (chapter 8), the skill, the schema's
+  query part and query's usage text name it. Why: the methods
+  tables are already in the store query reads (`-method` reads
+  them), so the frames cost one read of tables much smaller than
+  the events, and an event's code is then one command away
+  wherever the event lies. Rejected: frames by default — a slice
+  line then no longer decodes as a strict schema event, which the
+  acceptance harness and other readers rely on; the frames inside
+  the `java` object — the line would differ from the event's
+  encoding in its middle, and the schema's `java` has no such
+  field; separate method records in the slice — readers would
+  join ids per session themselves, the work the flag saves; a
+  stderr hint naming `-frames` whenever a stack is printed — the
+  M5 eval merges query's stderr into what the model reads, and
+  its query tool does not offer the flag; only a guide note on
+  reading `show report` — the rollup names a file's causing
+  methods, not an event's stack.

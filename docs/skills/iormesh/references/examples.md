@@ -112,6 +112,46 @@ not run `id -un` first and then `ssh -o BatchMode=yes
 neither is approved. If you want the value written out, ask the
 user for it, then explain the new command and wait again.
 
+## A command that depends on an earlier output
+
+Chapter 2: `tar` is installed only when `command -v tar` finds
+none. Do not list both with a condition:
+
+```text
+  1. command -v tar
+  2. sudo dnf install -y tar — only if command 1 shows no tar
+```
+
+Item 2 is not a command: the approval covers that whole line, so
+`sudo dnf install -y tar` on its own is unnamed, and in guided mode
+the user would type the note too. Explain the check alone:
+
+```text
+Step 1: check the controller's tools (guide chapter 2)
+Runs on: the laptop; contacts: nothing
+Commands:
+  1. command -v tar
+Changes: nothing
+Data leaving this machine: the output goes to my model provider
+Success: a path, such as /usr/bin/tar
+Approve? yes / no / change
+```
+
+If it printed a path, go on. If it printed nothing, explain the
+install as a new step and wait again:
+
+```text
+Step 2: install tar on the laptop (guide chapter 2)
+Runs on: the laptop; contacts: the distribution's package mirrors
+Commands:
+  1. sudo dnf install -y tar
+Changes: installs the tar package on the laptop
+Data leaving this machine: package requests go to the mirrors; the
+  output goes to my model provider
+Success: dnf exits 0; command -v tar prints a path
+Approve? yes / no / change
+```
+
 ## When the user says "change"
 
 The user: "change: only app1 for now". You write a new

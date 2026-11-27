@@ -159,7 +159,8 @@ func (t *Trial) respond(ctx context.Context, st *state, reply string) (string, m
 }
 
 // approve answers an explanation: "change" when it lacks the host, the
-// commands, the change or the outgoing data, else "yes" — in guided mode
+// commands (or a Commands item holds prose besides its command), the
+// change or the outgoing data, else "yes" — in guided mode
 // followed by the output of the named commands, typed by the user.
 func (t *Trial) approve(ctx context.Context, st *state, e Explanation) (string, map[string]string, string) {
 	if len(e.Missing) > 0 {

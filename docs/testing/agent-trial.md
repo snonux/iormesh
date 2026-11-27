@@ -125,12 +125,20 @@ files without a file tool.
 It says only what #37 ("Help") allows: the mode (`Mode: guided.`),
 in answer to the agent's first message that is not a `READ`;
 `yes` to an explanation that names the host (`Runs on:` one VM),
-the commands (a numbered list), the change and the outgoing data,
-`change` to one that does not; in guided mode, after `yes`, the
-output of exactly the named commands, typed in order on the named
-VM, each as `$ command` and its output (a non-zero exit as `[exit
-status N]`; a word-starting `@` escaped, as above). The user types
-into one terminal per VM, so a `cd` carries to the next command and
+the commands (a numbered list, each item the command alone), the
+change and the outgoing data, `change` to one that does not. An
+item with prose besides its command — a typographic dash, "only
+if …", "if needed" — names no command (task bn4, #37's amendment):
+the harness would match a `RUN` of the bare command against the
+whole line, and guided mode would type the prose. The listed
+forms get `change`; other wording (`(when missing)`, a trailing
+`# comment`) is not spotted, and an em dash inside a quoted
+argument is flagged too, a trade-off the guide's commands never
+meet. In guided mode, after `yes`, the output of exactly the
+named commands, typed in order on the named VM, each as
+`$ command` and its output (a non-zero exit as
+`[exit status N]`; a word-starting `@` escaped, as above). The
+user types into one terminal per VM, so a `cd` carries to the next command and
 step (`typedCommand`, task nm4); each `RUN` of automatic mode is its
 own ssh session, as the protocol says. A `RUN`'s
 output comes back the same way. A silent success reads `[no
@@ -216,7 +224,8 @@ fake ssh — the test binary itself, which logs its argv and answers
 like a VM without running anything: a pass in automatic mode and
 in guided mode, `Main` end to end (preparation, tunnel, first
 message, result and logs), a `RUN` without an explanation, an
-unnamed command, an incomplete explanation, a guided `RUN`, both
+unnamed command, an incomplete explanation, a Commands item with a
+condition in words (`change`, nothing typed), a guided `RUN`, both
 budgets, a low score, a missing mesh, the CLIs' argv and
 environment, `READ` outside the copy, `@` mentions in VM output
 (and, with `claude` installed, against a capture server), the
@@ -351,7 +360,9 @@ The stuck points, each a task (`+agent`):
   then ran the bare command. The harness matches exactly, as #37
   says, so the run failed; the skill says `<exact command>` but
   never that an item holds the command alone, or that a command
-  that depends on an earlier result is a new step.
+  that depends on an earlier result is a new step. Now it does,
+  with an example, and the scripted user answers such an item
+  `change` (#37's amendment).
 - **cn4** (fixed) — glm guided's mesh held every cross-service
   edge, but three of them `mixed`: 4 connections, 1 unresolved
   each. First read as the first round after deploy (the edges'
@@ -359,10 +370,21 @@ The stuck points, each a task (`+agent`):
   and `show report` place them in the last round before the
   collect (00:49:02–04): the round's client calls are there, the
   servers' sides are not, and billing's round-4 JVM's trace stops
-  before the accept it went on to serve. Each running session is
-  collected up to its own last rotation, a minute after its own
-  start (sessions started 00:47:05–11), so the build cut the
-  trace at different instants. #43 marks such a half `pending`
+  before the accept it went on to serve. Two things cut the
+  trace there. Each running session rotates a minute after its
+  own start (sessions started 00:47:05–11), so each is collected
+  up to a different rotation. And each session's records reach
+  the segment late: the correlator holds a socket event whose
+  conn id is not known yet — every cross-session connect or
+  accept, its other end being in another session — for its fuse
+  window (5 s, `internal/correlate` `release`), and every event
+  behind it waits too; the Java join holds an http record for
+  that window plus its 2 s timeout. So every session's collected
+  records stop up to that hold (5–7 s) before its rotation (all near
+  00:49:02–03: inventory, rotating ~00:49:07, lacks the accepts at
+  00:49:02.62 and 00:49:03.87; billing, ~00:49:05, the one at
+  00:49:03.03), and a connection in that tail has only the end
+  whose segment still took it. #43 marks such a half `pending`
   instead of unresolved. The owner settled the other half: the
   mesh check stays strict and every cross-service edge must read
   `fused` (#37, amended); chapter 6 says so and what to do.

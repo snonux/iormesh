@@ -11,23 +11,27 @@
 //
 // so a reader always knows it saw a partial answer and how much it
 // missed. An event stream at syscall frequency never fits a context
-// window; the slice is the unit that does.
+// window; the slice is the unit that does. With Input.Frames (-frames,
+// decision #42) a line with a Java stack ends in one more member,
+// java_frames: the stack's frames by name, so a reader needs no methods
+// table to read the code behind an event.
 //
 // The package is the pure part: Filter (what the flags say, validated),
 // Run (one or two passes over the sources, in their order) and the
 // capped writer. Loading the store — every segment checked in a
 // memory-capped child, the merge that gives connections their merged
-// ids, the methods tables -method needs — is internal/ctl's, which hands
-// Run only what passed those checks.
+// ids, the methods tables -method and -frames need — is internal/ctl's,
+// which hands Run only what passed those checks.
 //
 // Determinism: the sources are read in the order given (ctl passes them
 // sorted by store name, each session's segments in seq order), every
 // filter is a pure function of the event and of state built from earlier
 // events in that order, and the output is the schema's canonical
-// encoding, so the same store and flags give the same bytes.
+// encoding (java_frames, when asked for, appended after it), so the same
+// store and flags give the same bytes.
 //
 // Terminal safety: every line is escaped by termsafe.JSON after
 // encoding — the strings in it came from servers — and stays valid JSON
-// that decodes to the same event. The package is cgo-free
+// that decodes to the same event (and frames). The package is cgo-free
 // (internal/buildgate checks iormeshctl's closure).
 package query

@@ -156,6 +156,26 @@ func TestTrialIncompleteExplanation(t *testing.T) {
 	}
 }
 
+// TestTrialProseInCommandGetsChange: an explanation whose Commands item
+// carries a condition in words (glm-5.3-flash's in the rerun, task bn4)
+// gets "change"; in guided mode nothing is typed, so the prose never
+// reaches a shell.
+func TestTrialProseInCommandGetsChange(t *testing.T) {
+	step := "Runs on: iom1; contacts: nothing\nCommands:\n  1. rpm -q tar\n" +
+		"  2. sudo dnf install -y tar — only if command 1 shows no tar\n" +
+		"Changes: installs tar if missing\nData leaving this machine: the output\n"
+	agent := &standIn{replies: []string{askMode, step}}
+	tr, _, log := newTestTrial(t, Guided, agent)
+	tr.MaxTurns = 3
+	tr.Run(context.Background())
+	if agent.got[2] != changeWord {
+		t.Fatalf("user said %q, want %q", agent.got[2], changeWord)
+	}
+	if calls := sshCalls(t, log); len(calls) != 0 {
+		t.Errorf("ssh ran: %v", calls)
+	}
+}
+
 // TestTrialTurnBudget: an agent that never answers stops at the turn
 // budget and fails.
 func TestTrialTurnBudget(t *testing.T) {

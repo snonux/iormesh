@@ -32,4 +32,5 @@ Each part is its own file; open only the one you need.
   container id, #35 connections open before the session, #36
   large docs as an index plus parts, #37 a smaller agent installs
   and uses iormesh, #41 a `-file` glob that matches only a last
-  element says so.
+  element says so, #42 `query -frames` names a Java stack's
+  frames.

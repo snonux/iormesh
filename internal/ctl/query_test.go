@@ -259,6 +259,42 @@ func TestQueryMethod(t *testing.T) {
 	}
 }
 
+// TestQueryFrames: -frames ends each Java event's line with java_frames,
+// its stack's frames from the session's checked methods table, an id
+// the table lacks as method#<id> (decision #42, task an4); without it
+// the lines stay schema events. A damaged table is left out and named,
+// its ids stay method#<id>, and the command exits 1.
+func TestQueryFrames(t *testing.T) {
+	f := newBuildFixture(t)
+	h, methods := javaTrace()
+	h.events[2].Java.Stack = []uint64{2, 4} // 4: in no table
+	files := writeJavaSegment(t, f.store, "appJ", h, methods)
+	args := []string{"query", "-project", "shop", "-host", "appJ", "-frames"}
+	out := f.mustRun(t, args...)
+	golden(t, "query_frames.golden", out)
+	plain := f.mustRun(t, "query", "-project", "shop", "-host", "appJ")
+	if evs, _ := queryLines(t, plain); len(evs) != 4 || strings.Contains(plain, "java_frames") {
+		t.Errorf("without -frames: %d events, output %s", len(evs), plain)
+	}
+	for _, p := range files {
+		if strings.HasSuffix(p, ".methods.parquet") {
+			if err := os.WriteFile(p, []byte("PAR1 damaged PAR1"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	code := f.run(args...)
+	if code != exitError || !strings.Contains(f.stderr.String(), "left out shop/appJ/") ||
+		!strings.Contains(f.stdout.String(), `"java_frames":["method#1","method#3"]`) {
+		t.Errorf("damaged table: exit %d, stdout %s, stderr %s", code, f.stdout, f.stderr)
+	}
+	// -method read the table first: it is named once, not twice.
+	code = f.run(slices.Concat(args, []string{"-method", "*Main#run"})...)
+	if n := strings.Count(f.stderr.String(), "left out shop/appJ/"); code != exitError || n != 1 {
+		t.Errorf("damaged table with -method: exit %d, named %d times: %s", code, n, f.stderr)
+	}
+}
+
 // TestQueryKindPidErrnoOtel: -event, -pid, -errno (a name or a number)
 // and -otel-trace (any case) select through the store and AND with each
 // other (task wh4). The fixture's app1 (pid 100) has two connects

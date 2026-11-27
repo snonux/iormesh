@@ -1,6 +1,7 @@
 package agenttrial
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -10,7 +11,8 @@ import (
 // approval (docs/skills/iormesh/SKILL.md, "The rule: explain, then
 // wait"): the host it runs on, the commands, the change and the data
 // leaving the machine. The scripted user approves one only when it names
-// all four (decision #37, "Approval in the unattended trial").
+// all four (decision #37, "Approval in the unattended trial"), each
+// Commands item a command alone (missing).
 type Explanation struct {
 	Host     string
 	Commands []string
@@ -33,6 +35,11 @@ const (
 var (
 	labelLine    = regexp.MustCompile(`^([a-z][a-z ]*?)\s*:\s*(.*)$`)
 	numberedLine = regexp.MustCompile(`^\d+[.)]\s+(.+)$`)
+	// proseInCommand marks a Commands item that carries prose next to its
+	// command: a typographic dash, which shell never needs, or a condition
+	// in words ("only if command 1 shows no tar", "if needed"). Shell's own
+	// `--`, `#` comments and `if …; then` are not matched.
+	proseInCommand = regexp.MustCompile(`[—–]|(?i)\bonly (if|when)\b|\bif (needed|necessary)\b`)
 )
 
 // ParseExplanation reads an explanation out of a reply. ok is false when
@@ -62,7 +69,14 @@ func ParseExplanation(reply string, hosts []string) (e Explanation, ok bool) {
 	return e, ok
 }
 
-// missing names the parts an explanation lacks.
+// missing names the parts an explanation lacks. A Commands item that
+// holds prose besides its command counts as a missing command: the
+// harness matches a RUN against the items exactly, and guided mode types
+// each item as it stands, so the prose would reach the shell. In the
+// rerun (task bn4) glm-5.3-flash's approved item read "sudo dnf install
+// -y tar — only if command 1 shows no tar" and the bare command it ran
+// was unnamed; a conditional command belongs in a later step, after the
+// output it depends on.
 func missing(e Explanation) []string {
 	var m []string
 	if e.Host == "" {
@@ -70,6 +84,11 @@ func missing(e Explanation) []string {
 	}
 	if len(e.Commands) == 0 {
 		m = append(m, "the commands (a numbered list under Commands:)")
+	}
+	for i, c := range e.Commands {
+		if proseInCommand.MatchString(c) {
+			m = append(m, fmt.Sprintf("the command alone (Commands item %d holds prose: %q)", i+1, c))
+		}
 	}
 	if e.Changes == "" {
 		m = append(m, "what changes (Changes:)")
