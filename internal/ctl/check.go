@@ -120,6 +120,14 @@ func checkFile(ctx context.Context, path string) (segment.Summary, error) {
 // space (RLIMIT_AS), and sets the GC's soft limit inside it so the heap
 // is collected before the hard limit is hit. Without RLIMIT_AS the
 // check still runs, and still isolates a crash from the build.
+//
+// The current size counts address space the runtime reserved but has
+// not used yet, above all the rest of the heap arena (64 MiB on
+// linux/amd64): the heap can grow into it without a new mapping, so
+// the cap is space plus at most one arena. That slack is small next
+// to checkAddressSpace, but it makes the cap useless as a test of a
+// small decode under a tiny space (task 6p4); TestCheckCap allocates
+// past the slack instead.
 func capMemory(space int64) error {
 	debug.SetMemoryLimit(space / 2)
 	var cur syscall.Rlimit

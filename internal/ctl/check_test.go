@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,8 +16,8 @@ import (
 
 // TestChildChecker: the segment check runs in a child of this binary
 // (TestMain), returns the summary for a good segment, and fails the
-// segment — not the build — when the child runs out of its address
-// space or the file is no segment.
+// segment — not the build — when the file is no segment. Running out
+// of the address space is TestCheckCap's.
 func TestChildChecker(t *testing.T) {
 	f := newBuildFixture(t)
 	exe, err := os.Executable()
@@ -36,13 +37,39 @@ func TestChildChecker(t *testing.T) {
 		!strings.Contains(err.Error(), "check failed") {
 		t.Errorf("garbage: %v", err)
 	}
+}
+
+// TestCheckCap (task 6p4): a check child that needs more address space
+// than its cap dies of it, and the segment fails. A real decode of the
+// fixture's small segment cannot show it: the cap counts the unused
+// rest of the reserved heap arena (capMemory), the decode fits there,
+// and under a 64 KiB cap the child died only when the runtime happened
+// to map new metadata or a thread stack — so it now and then passed.
+// The child here allocates a known size instead (allocEnv), 256 MiB:
+// four arenas past that slack, untouched, so it costs no RAM.
+func TestCheckCap(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("RLIMIT_AS is enforced on Linux only")
 	}
-	// 64 KiB of address space beyond the start: any real decode needs
-	// more, and the child dies of it.
-	if _, err := childChecker(exe, 64<<10)(ctx, f.app1Files[0]); err == nil {
-		t.Error("a check without memory passed")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const alloc = 256 << 20
+	for _, c := range []struct {
+		name         string
+		space, alloc int64
+		fail         bool
+	}{
+		{"fits the build's cap", checkAddressSpace, alloc, false},
+		{"past the build's cap", checkAddressSpace, 2 * checkAddressSpace, true},
+		{"past a 64 KiB cap", 64 << 10, alloc, true},
+	} {
+		t.Setenv(allocEnv, strconv.FormatInt(c.alloc, 10))
+		_, err := childChecker(exe, c.space)(context.Background(), "unused.parquet")
+		if c.fail != (err != nil) || err != nil && !strings.Contains(err.Error(), "check failed") {
+			t.Errorf("%s: %v", c.name, err)
+		}
 	}
 }
 
