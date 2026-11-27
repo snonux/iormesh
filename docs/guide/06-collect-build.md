@@ -209,7 +209,10 @@ than that most likely missed one end. What to do:
    not registered. Check the pattern against `ps -eo args` on
    that host ([chapter 4](04-register-bootstrap.md#choosing-the-target)).
 
-Stop and report the edge if none of these explains it.
+An edge left `mixed` is never acceptable, not even as a harmless
+leftover of a few early connections: take the steps above, the
+prune included (an agent proposes it and waits for the yes), or
+stop and report the edge if none of them explains it.
 
 Reference: [architecture.md](../architecture.md) (the controller,
 the service database), [output-contract.md](../output-contract.md)

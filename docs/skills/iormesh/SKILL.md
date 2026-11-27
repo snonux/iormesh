@@ -7,8 +7,8 @@ description: "Install and use iormesh (BPF process-observability mesh) with its 
 
 You help the user install iormesh and trace their hosts with it.
 The **guide** holds the path, the commands and what success looks
-like. This skill holds only the protocol. Do not invent commands;
-take them from the guide.
+like; this skill, only the protocol. Do not invent commands; take
+them from the guide.
 
 Guide links are relative to `docs/skills/iormesh/` in the iormesh
 repository; if one does not open, open the same file under
@@ -28,7 +28,7 @@ Ask the user these in one message, first:
 4. **Where the release comes from** (a URL or a directory).
 5. **Trace data:** may its output go to the model you run on? Say
    that everything you read is sent to your model provider.
-6. **Mode:** automatic or guided (below).
+6. **Mode:** automatic or guided.
 
 Show the answers back as a short list. Contact only the hosts
 and URLs on that list.
@@ -83,7 +83,7 @@ Approve? yes / no / change
 - Never edit an approved command, not even to fill in a value
   it computes. Approved `ssh -o BatchMode=yes "$(id -un)@app1"
   true`: run exactly that. `ssh -o BatchMode=yes "ops@app1" true`
-  is a new command, so explain it and wait again. Prefer
+  is a new command: explain it and wait again. Prefer
   commands that need no value from an earlier one; ask the user
   for the value instead.
 - "no": stop and ask what to do instead. "change": write a new
@@ -122,18 +122,19 @@ Notes:
   ([ch. 4](../../guide/04-register-bootstrap.md#choosing-the-target)).
 - `bootstrap`, `deploy` read `./dist` unless `-dist` names the
   signed release directory.
-- Name services; every expected edge must read `fused`
-  ([ch. 6](../../guide/06-collect-build.md#name-your-services)).
-- Full stack: `show sequence ID -json` or `query -frames`
-  ([ch. 8](../../guide/08-java-query.md#from-a-step-to-its-raw-events-query)).
-- `query -file` globs match whole paths
+- Name services. Every cross-service edge must read `fused`; a
+  `mixed` edge is a fault, never acceptable: follow
+  [ch. 6](../../guide/06-collect-build.md#name-your-services)'s
+  steps, proposing its `prune -apply`, or stop and ask.
+- Full stack: `show sequence ID -json` or `query -frames`;
+  `query -file` globs match whole paths
   ([ch. 8](../../guide/08-java-query.md#from-a-step-to-its-raw-events-query)).
 - Use `-apply` on bootstrap only when the SSH user has sudo
   without a password (`ssh HOST sudo -n true` exits 0). Else
-  print the steps and hand them to the user (Human step).
+  print the steps and hand them to the user.
 - Start the traced services before `deploy`; the step after it
   begins with `sleep 120`.
-- Reading: start small — `show`, `show health`, `show edges` —
+- Reading: start small (`show`, `show health`, `show edges`),
   then one conversation, then single events by ref
   ([ch. 13](../../guide/13-agents.md#trace-data-stays-local)).
   Answer with the quoted lines and their refs.
@@ -147,10 +148,10 @@ to type, even in automatic mode:
 
 1. Accept a host key (compare its fingerprint first).
 2. Grant sudo, or type a sudo password.
-3. Choose or type the signing key's password — ch. 3. Once the
-   user has put it in `$IORMESH_MINISIGN_PASSWORD`, you may run
-   `keygen` (makes the key; it never replaces one) and `sign`,
-   which both read it from there. If it is not set, ask the user
+3. Choose or type the signing key's password. Once the user has
+   put it in `$IORMESH_MINISIGN_PASSWORD`, you may run `keygen`
+   (makes the key; it never replaces one) and `sign`, which read
+   it from there. If it is not set, ask the user
    to set it; do not run `minisign -G`, which asks on a terminal.
    Never print, echo or write the password.
 4. Run bootstrap's printed steps on a host when sudo asks for a
@@ -158,7 +159,7 @@ to type, even in automatic mode:
 5. Apply a `-javaagent` drop-in, a systemd timer or a Kubernetes
    patch — ch. 8, 9, 11. You may draft it.
 6. Write the `expand:` allowlist — ch. 10.
-7. Decide where trace data may go — ch. 13.
+7. Decide where trace data may go.
 
 The guide's Human-step boxes on `deploy`, `prune -apply`, `rm`
 and `expand -apply` are different: in

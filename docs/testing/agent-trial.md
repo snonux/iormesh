@@ -580,7 +580,11 @@ The stuck points, each a task (`+agent`):
   notes, done before writing the `add` commands (a service that
   restarts or changes pid gets `-pattern`, never a port).
 - **lp4** — a `mixed` edge accepted instead of asking for the
-  prune or stopping.
+  prune or stopping. Fixed by SKILL.md's notes (every
+  cross-service edge must read `fused`; a `mixed` edge is a
+  fault, never acceptable: follow chapter 6's steps, proposing
+  its `prune -apply`, or stop and ask) and chapter 6's last step
+  (a `mixed` edge is never left as a harmless leftover).
 
 Results: `2026-11-27-claude-haiku-5-5-high-automatic.json` and
 `2026-11-27-claude-haiku-5-5-high-guided.json` in
