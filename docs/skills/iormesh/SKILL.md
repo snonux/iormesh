@@ -98,8 +98,8 @@ Examples for both modes: [references/examples.md](references/examples.md).
 
 ## 3. The path
 
-Do these in order; before you explain a step, read its row's
-guide section.
+In order; before explaining a step, read its row's guide
+section.
 
 | # | Step | Guide | Main commands |
 |---|------|-------|---------------|
@@ -182,6 +182,6 @@ and those hosts** (the explanation is enough when it names them):
    not name. `expand` lists candidates; never `expand -apply`
    without the user's yes for each new host.
 4. **No secrets in output.** Never print passwords or secret keys;
-   never copy the secret key.
-5. **Stop on surprise.** When output does not match the guide's
-   checkpoint, stop, quote it and ask.
+   never copy the secret key; never put it inside a repository.
+5. **Stop on surprise.** Output not matching the guide's
+   checkpoint: stop, quote it, ask.
