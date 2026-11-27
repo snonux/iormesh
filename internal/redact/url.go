@@ -2,6 +2,7 @@ package redact
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -10,11 +11,45 @@ import (
 // value, a "-Ddb.url=jdbc:postgresql://…" property: userinfo (always) and
 // the values of denied query parameters. A URL ends at white space or a
 // quote, as in a sentence or a shell string. Besides Oracle's
-// "jdbc:oracle:thin:user/password@…" (see maskOracle), text without
-// "://" is returned unchanged; a bare "?" in an argument is a glob or a
-// question, not a query string.
+// "jdbc:oracle:thin:user/password@…" and Go's "user:password@tcp(h)/db"
+// (see maskSchemeless), text without "://" is returned unchanged; a bare
+// "?" in an argument is a glob or a question, not a query string.
 func (p Policy) Text(s string) string {
-	return p.maskURLs(maskOracle(s), false)
+	return p.maskURLs(maskSchemeless(s), false)
+}
+
+// maskSchemeless masks the credentials of the URL-like forms without
+// "://", which urlSpans does not see: Oracle's thin URLs and Go's MySQL
+// DSNs.
+func maskSchemeless(s string) string {
+	return maskGoDSN(maskOracle(s))
+}
+
+// goDSN finds a Go MySQL driver DSN, "user:password@proto(addr)/db" or
+// "user:password@/db" (task qp4), at the start of s or after white
+// space, a quote or '='. The '@' must be followed by "proto(" or by one
+// '/' (Oracle's "@//host" is maskOracle's), so "image:tag@sha256:…" and
+// "user@host:path" are not taken for one; the password (group 1) runs to
+// the last such '@', as the driver reads it.
+var goDSN = regexp.MustCompile(`(?:^|[\s'"=])[^\s'"=:@/]+:([^\s'"]*)@(?:[A-Za-z0-9]+\(|/(?:[^/]|$))`)
+
+// maskGoDSN masks the password of every Go MySQL DSN in s.
+func maskGoDSN(s string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range goDSN.FindAllStringSubmatchIndex(s, -1) {
+		if m[3] == m[2] {
+			continue // no password
+		}
+		b.WriteString(s[last:m[2]])
+		b.WriteString(Mask)
+		last = m[3]
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
 }
 
 // wordText is Text for one argv word: the program got it as one
@@ -23,7 +58,7 @@ func (p Policy) Text(s string) string {
 // a quote still ends at the matching quote, which keeps a quoted shell
 // word ("'https://h/?a=b'") intact.
 func (p Policy) wordText(s string) string {
-	return p.maskURLs(maskOracle(s), true)
+	return p.maskURLs(maskSchemeless(s), true)
 }
 
 // startsWithURL reports an element that begins with a URL, after at most

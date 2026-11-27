@@ -54,30 +54,50 @@ type Policy struct {
 // otherwise. The globs are deliberately broad ("*token*" also masks a
 // "--tokenizer" value): over-masking loses a value, under-masking leaks
 // one. Query values are all masked — decision #22's default — since a
-// query string's names say nothing reliable about what is secret.
+// query string's names say nothing reliable about what is secret. Every
+// entry has a case in testdata/corpus.tsv that needs it (task qp4):
+// "*auth" for REDISCLI_AUTH, npm's _auth and httpie's --auth,
+// "*accountkey*" for Azure's --account-key and AccountKey=.
 func Default() Policy {
 	return Policy{
 		ArgvDeny: []string{
 			"*password*", "*passwd*", "*passphrase*", "*pwd",
 			"*pass", "passin", "passout", // openssl -pass/-passin
 			"*secret*", "*token*", "*apikey*", "*accesskey*",
-			"*privatekey*", "*credential*", "*authorization*",
-			"*bearer*", "*cookie*",
+			"*accountkey*", "*privatekey*", "*credential*",
+			"*authorization*", "*bearer*", "*cookie*", "*auth",
 		},
-		FlagRules: []FlagRule{
-			{Program: "mysql*", Flag: "-p"},
-			{Program: "mariadb*", Flag: "-p"},
-			{Program: "sshpass", Flag: "-p"},
-			{Program: "redis-cli", Flag: "-a"},
-			{Program: "curl", Flag: "-u"},
-			{Program: "curl", Flag: "--user"},
-			// docker/podman login: "run -p" is a port mapping.
-			{Program: "login", Flag: "-p"},
-		},
+		FlagRules:   defaultFlagRules(),
 		HeaderDeny:  defaultHeaderDeny(),
 		AuthSchemes: defaultAuthSchemes(),
 		URLHeaders:  defaultURLHeaders(),
 		QueryDeny:   []string{"*"},
+	}
+}
+
+// defaultFlagRules is Default's FlagRules: the options whose name is too
+// generic to deny everywhere, each for the programs where it carries a
+// password (mongo* and az: -p; curl -U/--proxy-user and httpie -a:
+// user:password; gh secret set -b/--body: the secret, task qp4).
+func defaultFlagRules() []FlagRule {
+	return []FlagRule{
+		{Program: "mysql*", Flag: "-p"},
+		{Program: "mariadb*", Flag: "-p"},
+		{Program: "mongo*", Flag: "-p"},
+		{Program: "az", Flag: "-p"},
+		{Program: "sshpass", Flag: "-p"},
+		{Program: "redis-cli", Flag: "-a"},
+		{Program: "curl", Flag: "-u"},
+		{Program: "curl", Flag: "--user"},
+		{Program: "curl", Flag: "-U"},
+		{Program: "curl", Flag: "--proxy-user"},
+		{Program: "http", Flag: "-a"},
+		{Program: "https", Flag: "-a"},
+		// docker/podman login: "run -p" is a port mapping.
+		{Program: "login", Flag: "-p"},
+		// gh secret set NAME -b x.
+		{Program: "secret", Flag: "-b"},
+		{Program: "secret", Flag: "--body"},
 	}
 }
 
@@ -94,9 +114,13 @@ func Default() Policy {
 // forward: X-JWT-Assertion (WSO2), Cf-Access-Jwt-Assertion, X-Goog-IAP-
 // JWT-Assertion, X-Amzn-Oidc-Data, X-Userinfo, X-Ms-Client-Principal,
 // CSRF/XSRF and OTP headers. "auth" counts only as a whole last word
-// (X-Auth, X-Upstream-Auth) and "authentication" only first
-// (Authentication, Authentication-Info), so WWW-Authenticate, a
-// challenge without a secret, stays readable.
+// (X-Auth, X-Upstream-Auth) and "authentication" anywhere
+// (Authentication-Info, Proxy-Authentication-Info; task qp4), so
+// WWW-Authenticate and Proxy-Authenticate, challenges without a secret,
+// stay readable. "*hmac*" names webhook signatures under another word
+// (X-Shopify-Hmac-Sha256), and "*websocketprotocol*" the header
+// Kubernetes clients carry a bearer token in over WebSocket
+// ("base64url.bearer.authorization.k8s.io.<token>"; task qp4).
 func defaultHeaderDeny() []string {
 	return []string{
 		"*authorization*", "*cookie*", "*bearer*", "*credential*",
@@ -105,7 +129,8 @@ func defaultHeaderDeny() []string {
 		"*api*key*", "*auth*key*", "*access*key*", "*private*key*",
 		"*subscription*key*", "*functions*key*",
 		"*jwt*", "*assertion*", "*oidc*", "*userinfo*", "*principal*",
-		"*csrf*", "*xsrf*", "*otp", "*auth", "authentication*",
+		"*csrf*", "*xsrf*", "*otp", "*auth", "*authentication*",
+		"*hmac*", "*websocketprotocol*",
 	}
 }
 
@@ -140,6 +165,8 @@ type argvState struct {
 // the specific forms do not know (JSON, YAML, a pair inside a longer
 // string); it runs here, once per element, so nested forms do not repeat
 // it. A denied key left open at the element's end masks the next one.
+// Last, maskSQL masks the passwords of SQL statements (psql -c "ALTER
+// USER u PASSWORD 'x'"), which have no key-value separator.
 func (p Policy) Argv(argv []string) []string {
 	if argv == nil {
 		return nil
@@ -156,6 +183,7 @@ func (p Policy) Argv(argv []string) []string {
 		}
 		var open bool
 		out[i], open = p.keyValues(out[i])
+		out[i] = maskSQL(out[i])
 		st.maskNext = st.maskNext || open
 	}
 	return out
@@ -195,7 +223,12 @@ func (p Policy) word(st *argvState, arg string) string {
 // see records arg as a program word when it is no option and some
 // FlagRule names it, once. Other words, and repeats, are not kept: a long
 // shell string would otherwise make every later word scan them all.
+//
+// Quotes around the word are dropped: in sh -c 'sudo sh -c "mysql -px"'
+// the quoted run splits into `"mysql` and `-px"`, and the program is
+// still mysql (task qp4).
 func (p Policy) see(st *argvState, arg string) {
+	arg = strings.Trim(arg, `'"`)
 	if arg == "" || strings.HasPrefix(arg, "-") {
 		return
 	}

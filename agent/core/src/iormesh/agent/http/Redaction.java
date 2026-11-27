@@ -19,8 +19,10 @@ import java.util.Locale;
  *       api/auth/access/private/subscription/functions key
  *       (X-Forwarded-Authorization, Cookie2, X-Api-Key, X-Auth-Key),
  *       or naming a JWT, assertion, OIDC, userinfo, principal, CSRF/XSRF
- *       or OTP header, "auth" as its last word or "authentication" as
- *       its first (X-JWT-Assertion, X-Amzn-Oidc-Data, X-Auth);
+ *       or OTP header, "auth" as its last word, "authentication" or
+ *       "hmac" anywhere, or Sec-WebSocket-Protocol (X-JWT-Assertion,
+ *       X-Amzn-Oidc-Data, X-Auth, Proxy-Authentication-Info,
+ *       X-Shopify-Hmac-Sha256);
  *   <li>a header value that is a credential by its shape is "name: ***"
  *       under any name: a JWT anywhere in it, or a Bearer, Basic, Digest
  *       or Negotiate scheme with a credential after it;
@@ -54,14 +56,19 @@ public final class Redaction {
      * and clouds forward (X-JWT-Assertion, Cf-Access-Jwt-Assertion,
      * X-Amzn-Oidc-Data, X-Userinfo, X-Ms-Client-Principal, CSRF and OTP
      * headers); "auth" counts only as a whole last word and
-     * "authentication" only first, so WWW-Authenticate stays readable.
+     * "authentication" anywhere (Proxy-Authentication-Info, task qp4),
+     * so WWW-Authenticate and Proxy-Authenticate stay readable. "*hmac*"
+     * names webhook signatures (X-Shopify-Hmac-Sha256) and
+     * "*websocketprotocol*" the header Kubernetes clients carry a bearer
+     * token in over WebSocket (task qp4).
      */
     static final List<String> HEADER_DENY = List.of("*authorization*", "*cookie*",
             "*bearer*", "*credential*", "*token*", "*secret*", "*password*", "*passwd*",
             "*passphrase*", "*pwd", "*pass", "*session*", "*signature*", "*api*key*",
             "*auth*key*", "*access*key*", "*private*key*", "*subscription*key*",
             "*functions*key*", "*jwt*", "*assertion*", "*oidc*", "*userinfo*",
-            "*principal*", "*csrf*", "*xsrf*", "*otp", "*auth", "authentication*");
+            "*principal*", "*csrf*", "*xsrf*", "*otp", "*auth", "*authentication*",
+            "*hmac*", "*websocketprotocol*");
 
     /**
      * internal/redact.Default().AuthSchemes (checked by the same test): a
@@ -119,12 +126,19 @@ public final class Redaction {
         return authCredential(value) || hasJwt(value);
     }
 
-    /** "Bearer abc" yes; "Bearer" alone or "Basically fine" no. */
+    /**
+     * "Bearer abc" yes; "Bearer" alone or "Basically fine" no. Any white
+     * space ends the scheme word, a TAB too ("Bearer\tabc", task qp4),
+     * as internal/redact's authCredential (strings.Fields).
+     */
     private static boolean authCredential(String value) {
         String v = value.strip();
-        int sp = v.indexOf(' ');
-        if (sp < 0 || v.substring(sp + 1).isBlank()) {
-            return false;
+        int sp = 0;
+        while (sp < v.length() && !Character.isWhitespace(v.charAt(sp))) {
+            sp++;
+        }
+        if (sp == v.length()) {
+            return false;   // one word, or nothing: no credential after a scheme
         }
         return AUTH_SCHEMES.contains(v.substring(0, sp).toLowerCase(Locale.ROOT));
     }
