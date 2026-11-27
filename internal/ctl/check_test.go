@@ -78,8 +78,9 @@ func TestCheckCap(t *testing.T) {
 // real check, so this one runs it (Main, checkSegmentCommand) on a good
 // segment and has the child report its RLIMIT_AS afterwards
 // (rlimitEnv). The limit must be what capMemory sets: SPACE over a
-// virtual size the child had then, no more than it has now. A check
-// that decoded without capMemory would report no limit.
+// plausible virtual size at the cap (not compared with the size at the
+// report, which can be smaller). A check that decoded without
+// capMemory would report no limit.
 func TestCheckSegmentCapsItself(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("RLIMIT_AS is enforced on Linux only")
@@ -102,9 +103,17 @@ func TestCheckSegmentCapsItself(t *testing.T) {
 	if _, err := fmt.Sscan(string(data), &limit, &mapped); err != nil {
 		t.Fatalf("report %q: %v", data, err)
 	}
-	if limit < checkAddressSpace || limit-checkAddressSpace == 0 || limit-checkAddressSpace > mapped {
-		t.Errorf("RLIMIT_AS %d with %d mapped: not %d over the size at the cap", limit, mapped,
-			checkAddressSpace)
+	// The limit is the virtual size at the cap plus checkAddressSpace.
+	// That size is not comparable with the one reported after the
+	// check: the process can shrink in between (thread stacks and
+	// non-heap mappings released; seen in a gate run, 2026-11-27, 40 MB
+	// less at the report), so the test only asks for a cap above
+	// checkAddressSpace by a plausible process size. A child that
+	// skips capMemory reports RLIM_INFINITY and fails here.
+	const maxStartSize = 64 << 30
+	if limit <= checkAddressSpace || limit-checkAddressSpace > maxStartSize || mapped == 0 {
+		t.Errorf("RLIMIT_AS %d with %d mapped: not %d over a process size at the cap", limit,
+			mapped, checkAddressSpace)
 	}
 }
 
