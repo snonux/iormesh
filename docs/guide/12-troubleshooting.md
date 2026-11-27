@@ -60,7 +60,7 @@ it; `…` stands for the part that varies.
 | `sudo: a password is required` (deploy) | The sudoers rule is missing or names another user than the one deploy logs in as: bootstrap again. |
 | `target spec: nothing listens on TCP port …` | A `-listen-port` session needs the server listening at its start: start the server, then deploy again. |
 | `iormesh-….service exited before the tracer attached; …` | The cause is the last journal line printed under the error (often `nothing listens on TCP port …`); fix it, deploy again. |
-| `no /opt/iormesh/traces/…/ready yet, nothing to collect`, or `0 new files` | No minute has completed yet: wait a minute or two and collect again; check `iormeshctl status` says `running`. |
+| `no /opt/iormesh/traces/…/ready yet, nothing to collect`, or `0 new files` | No minute has completed yet: wait a minute or two (`sleep 120`) and collect again; check `iormeshctl status` says `running`. |
 | `build: nothing collected in … yet (iormeshctl collect)`, `trace store: … no such file or directory` | Nothing was collected yet: collect first. |
 | `show: no build of … yet` / `open: no site of … yet` | Build first, with the same `-project` set. |
 | a build with no events of the app | `-pattern` matches nothing: it is a glob over the whole command line as `ps -eo args` shows it, so it usually needs `*` at both ends. |

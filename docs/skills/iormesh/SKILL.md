@@ -19,7 +19,7 @@ Read first:
 
 ## 1. Start: facts and mode
 
-Ask the user these, in one message, before anything else:
+Ask the user these in one message, first:
 
 1. Which machine is the **controller** (where `iormeshctl` runs)?
    Is it the machine you run on?
@@ -31,8 +31,8 @@ Ask the user these, in one message, before anything else:
    that everything you read is sent to your model provider.
 6. **Mode:** automatic or guided (below).
 
-Write the answers as a short list and show it back. Contact
-only the hosts and URLs on that list.
+Show the answers back as a short list. Contact only the hosts
+and URLs on that list.
 
 **Modes:**
 
@@ -47,8 +47,8 @@ the user's to type, in either mode.
 
 ## 2. The rule: explain, then wait
 
-Before **every** step, send an explanation in this form and stop.
-Do nothing until the user answers.
+Before **every** step, send an explanation in this form, then do
+nothing until the user answers.
 
 Reading this skill and the guide needs no approval: read them from
 the files you were given, with your file-reading tool, not with a
@@ -76,6 +76,8 @@ Approve? yes / no / change
 - One step may hold several commands. Each item is the command
   alone: no condition or note after it. A command that depends on
   an earlier output is a new step, explained after that output.
+  A wait is a command (`sleep 120`), never a note asking the
+  user to wait.
 - Run only the commands the approved explanation names, exactly
   as written, character for character. A new or changed command
   needs a new explanation and a new approval.
@@ -128,8 +130,8 @@ Notes:
 - Use `-apply` on bootstrap only when the SSH user has sudo
   without a password (`ssh HOST sudo -n true` exits 0). Else
   print the steps and hand them to the user (Human step).
-- Start the traced services before `deploy` (ch. 5). Wait a
-  minute or two after `deploy` before `collect`.
+- Start the traced services before `deploy`; the step after it
+  begins with `sleep 120` (ch. 5).
 - Reading: start small — `show`, `show health`, `show edges` —
   then one conversation, then single events by ref
   ([ch. 13](../../guide/13-agents.md#trace-data-stays-local)).
@@ -139,8 +141,8 @@ Notes:
 
 ## 4. Human steps: never do these yourself
 
-The guide marks them **Human step**. Hand each to the user, with
-the exact text to type, even in automatic mode:
+Hand each guide **Human step** to the user, with the exact text
+to type, even in automatic mode:
 
 1. Accept a host key (compare its fingerprint first) — ch. 2.
 2. Grant sudo, or type a sudo password — ch. 2, ch. 4.
@@ -180,6 +182,6 @@ and those hosts** (the explanation is enough when it names them):
    not name. `expand` lists candidates; never `expand -apply`
    without the user's yes for each new host.
 4. **No secrets in output.** Never print passwords or secret keys;
-   never copy the secret key; never put it inside a repository.
+   never copy the secret key.
 5. **Stop on surprise.** When output does not match the guide's
    checkpoint, stop, quote it and ask.

@@ -133,8 +133,8 @@ iom2    billing  running  -           2026-11-26T16:33:24Z  0.1.0    1
 | `NOTE` | e.g. `stopped by operator: ensure leaves it` |
 
 **Checkpoint:** every row reads `running`. Now make the client
-talk to the server, so there is something to see, and wait a
-minute or two: the tracer publishes a segment per minute.
+talk to the server, so there is something to see, and wait two
+minutes (`sleep 120`): the tracer publishes a segment per minute.
 
 On the host itself, `sudo /opt/iormesh/bin/iormesh status` prints
 the same per project, and `journalctl -u iormesh-shop.service`

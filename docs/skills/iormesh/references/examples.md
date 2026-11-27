@@ -32,8 +32,8 @@ report:
 Done. status shows:
 app1    shop     running  -  2026-11-26T16:33:20Z  0.1.0  1
 app2    billing  running  -  2026-11-26T16:33:24Z  0.1.0  1
-Every row is running. Next, step 9: collect and build, in a minute
-or two.
+Every row is running. Next, step 9: collect and build, its first
+command `sleep 120`.
 ```
 
 ## Guided mode: the same step

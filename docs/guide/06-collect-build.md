@@ -31,7 +31,8 @@ left on a host count against its disk limit.
 
 **If not:** `app1: project shop: no /opt/iormesh/traces/shop/ready
 yet, nothing to collect` means no minute has finished yet, or the
-session never started: wait a minute and check `status`
+session never started: wait a minute (`sleep 60`) and check
+`status`
 ([chapter 5](05-deploy-status.md)).
 
 ## Build

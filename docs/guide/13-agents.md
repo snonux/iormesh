@@ -82,7 +82,7 @@ stops at the first one that does not match:
 | register | `iormeshctl list` | one row per host and project |
 | bootstrap | (human, on the host) `sudo -n /opt/iormesh/bin/iormesh status` | no prompt; `iormesh: no sessions` |
 | deploy | `iormeshctl status` | every row `running` |
-| collect | `iormeshctl collect` | `N new files` with N > 0, after a minute or two |
+| collect | `iormeshctl collect` | `N new files` with N > 0, after `sleep 120` |
 | build | `iormeshctl build` | exit 0, a `site` line, the expected edges `fused` |
 
 Exit codes: 0 success, 1 a failure (the message says which host),
