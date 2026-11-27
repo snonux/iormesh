@@ -39,7 +39,7 @@ func readCorpus(t *testing.T) []corpusCase {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // read-only: a close error loses nothing
 	var cases []corpusCase
 	sc := bufio.NewScanner(f)
 	for n := 1; sc.Scan(); n++ {
