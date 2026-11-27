@@ -76,9 +76,15 @@ run glued to a bare value (`password:>s`) is masked with it; a
 one-word `KEY=VALUE` under a denied key loses the rest of the
 word (`{"password"=>"s"}` → `{"password"=***`); a blank after an
 even run of backslashes, which a shell does split at, still
-counts as part of the value; `--password-stdin` and `--no-auth`
-mask the argument after them; and a quoted word after `PASSWORD`
-in prose is masked as a SQL value. HTTP headers (M3) use the
+counts as part of the value; `--password-stdin`, `--no-auth`,
+`--oauth` and `--auth=none` mask the argument or value after
+them; a quoted word after `PASSWORD`, or a word after
+`IDENTIFIED BY`, in prose is masked as a SQL value (an unclosed
+quote after it masks to the end of the string); `host:x@/path`
+shapes read as a Go MySQL DSN; `mongod`/`mongos -p PORT` and
+`kubectl get secret -b x` mask the flag's value; and the whole
+`Sec-WebSocket-Protocol` header and `X-Hmac-*` headers are
+masked, ordinary subprotocols included. HTTP headers (M3) use the
 same package:
 names containing `authorization`, `cookie`, `bearer`,
 `credential`, `token`, `secret`, `password`, `passwd`,
@@ -145,5 +151,5 @@ case that keeps its canary:
 | `no-separator` | `<password>s</password>`, `<wsse:Password>s</wsse:Password>`, `password -> s`, `password s` | no `:` or `=` between key and value (XML, an arrow, prose); a parser per syntax is out of scope |
 | `call-argument` | `define('DB_PASSWORD', 's')`, `os.environ.setdefault("TOKEN", "s")`, `System.setProperty("db.password", "s")`, `db.auth("u", "s")` | key and value are separate arguments of a call; which argument is secret depends on the function |
 | `split-element` | `password` `:` `s` as three elements, `{"password"` then `:"s"}`, `{"password":["x` then `s"]}` | the pair is split across argv elements; only an open separator at an element's end carries over |
-| `json-escape` | `{"password":"s"}` | the key is written with JSON `\u` escapes, which the scan does not decode |
+| `json-escape` | `{"pass\u0077ord":"s"}` | the key is written with JSON `\u` escapes, which the scan does not decode |
 | `path-segment` | `/reset/s`, `https://hooks.slack.com/services/T/B/s`, `https://api.telegram.org/bots/…` | path segments are recorded verbatim (decision #22: templated at the controller's aggregations, raw in the events) |
