@@ -98,15 +98,27 @@ $ iormeshctl query -ref iormesh-it/local/host1-79d2d3d5/4679
 ```
 
 One NDJSON line per event, in the trace schema. The `stack` holds
-method ids of the session's methods table, not frames, so `query
--ref` is not where to read a step's code. The frames are in `show
-sequence ID -json` (every step's stack, top first; `show
+method ids of the session's methods table, not frames. Add
+`-frames` to any query and each line with a stack ends in
+`java_frames`, the same stack by name, innermost first; an id the
+tables lack reads `method#ID` (decision #42). From the test golden
+`internal/ctl/testdata/query_frames.golden`:
+
+```text
+$ iormeshctl query -project shop -host appJ -event openat -frames
+{…,"event":"openat",…,"args":{"path":"/data/order-42.json"},"attribution":"java","java":{"thread":"worker-1","stack":[1,3]},"java_frames":["com.shop.DataStore#save(DataStore.java:42)","com.shop.Main#run(Main.java:3)"]}
+```
+
+That is the way to an event's code when no conversation holds it
+— a `main` thread's unlink of a certificate, say, found with
+`-file`. A conversation's steps carry their frames in `show
+sequence ID -json` too (every step's stack, top first; `show
 sequence` prints only the top one,
 [chapter 7](07-read-the-mesh.md#one-conversation-show-sequence)),
-the site's and the TUI's step detail. The first frame outside the
-JDK is the application method, e.g. `DataStore#save` under a
-`java.io.FileOutputStream#write`. From that method back to all
-its events: `query -method
+and in the site's and the TUI's step detail. The first frame
+outside the JDK is the application method, e.g. `DataStore#save`
+under a `java.io.FileOutputStream#write`. From that method back to
+all its events: `query -method
 'iormesh.workload.scenarios.DataStore#save'`. `query -event http`
 prints every http event the same way, both ends of each hop:
 [query-http.ndjson](../examples/query-http.ndjson).
@@ -125,6 +137,9 @@ prints every http event the same way, both ends of each hop:
 | `-errno NAME` | calls that failed with it (`ENOENT` or `2`) |
 | `-otel-trace ID` | events inside an OpenTelemetry trace's spans |
 | `-from T`, `-to T` | a window; `-to` is exclusive |
+
+`-frames` selects nothing: it adds `java_frames` to what the
+filters print.
 
 The GLOBs are Go `path.Match` patterns: `*` stops at `/`. A
 `-file` glob must match the whole path, so `-file

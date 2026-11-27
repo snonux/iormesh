@@ -2,8 +2,10 @@ package query
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 
 	"iormesh/internal/federate"
 	"iormesh/internal/schema"
@@ -34,6 +36,11 @@ type Input struct {
 	// Methods holds, per Source.Session, the method ids whose frame
 	// Filter.MatchesMethod accepted.
 	Methods map[string]map[uint64]bool
+	// Frames holds, per Source.Session, the frame text of each method
+	// id ("class#method(file:line)"), for -frames (decision #42, task
+	// an4). Nil leaves the lines schema events; non-nil, even empty,
+	// ends every line with a Java stack in java_frames.
+	Frames map[string]map[uint64]string
 }
 
 // Stats is what a query wrote.
@@ -79,8 +86,11 @@ func Run(ctx context.Context, w io.Writer, in Input, f Filter, maxBytes int64) (
 		if err != nil || !ok {
 			return err
 		}
-		buf = append(schema.AppendEvent(buf[:0], ev), '\n')
-		return out.line(termsafe.JSON(buf))
+		buf = schema.AppendEvent(buf[:0], ev)
+		if in.Frames != nil && ev.Java != nil && len(ev.Java.Stack) > 0 {
+			buf = appendFrames(buf, in.Frames[src.Session], ev.Java.Stack)
+		}
+		return out.line(termsafe.JSON(append(buf, '\n')))
 	})
 	if err != nil {
 		return out.stats, err
@@ -88,6 +98,31 @@ func Run(ctx context.Context, w io.Writer, in Input, f Filter, maxBytes int64) (
 	st, err := out.close()
 	st.FileBaseMatch = m.fileBaseMatch()
 	return st, err
+}
+
+// appendFrames ends line, one encoded event object, with java_frames:
+// the frame text of each id of stack, in its order (innermost first),
+// from the session's frames; an id they lack is "method#<id>", as the
+// view model names one (viewmodel.Recorder.Frame). The member is
+// appended after the event's own, not into its java object, so the
+// rest of the line is byte for byte the event's schema encoding and
+// dropping the member gives back a strict schema event (decision #42).
+// A frame comes from a server: termsafe.JSON escapes the whole line
+// after.
+func appendFrames(line []byte, frames map[uint64]string, stack []uint64) []byte {
+	line = append(line[:len(line)-1], `,"java_frames":[`...)
+	for i, id := range stack {
+		if i > 0 {
+			line = append(line, ',')
+		}
+		f, ok := frames[id]
+		if !ok {
+			f = "method#" + strconv.FormatUint(id, 10)
+		}
+		quoted, _ := json.Marshal(f) // a string always encodes
+		line = append(line, quoted...)
+	}
+	return append(line, "]}"...)
 }
 
 // each calls fn for every event of every source, in order, with the

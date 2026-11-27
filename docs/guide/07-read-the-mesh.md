@@ -206,8 +206,9 @@ How to read a step:
 
   The first frame outside the JDK, `DataStore#save`, is the
   code behind the step. `query -ref` prints the raw event, whose
-  stack holds method ids, not frames; `query -method` goes the
-  other way, from a method to its events
+  stack holds method ids, not frames (`-frames` adds them by
+  name); `query -method` goes the other way, from a method to its
+  events
   ([chapter 8](08-java-query.md#from-a-step-to-its-raw-events-query)).
 
 ### More views

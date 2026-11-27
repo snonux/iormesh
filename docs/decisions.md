@@ -37,7 +37,7 @@ then open only the part you need.
     Go](decisions/decided/layout-release.md) — #30–#33, #38, #40.
   - [Container ids, pre-session connections, docs and
     agents](decisions/decided/tracing-docs-agents.md) — #34–#37,
-    #41.
+    #41, #42.
 - [Open — built on the default](decisions/open.md) — open questions raised for
   M2, M3 and M4, each with the default built.
   - [Open — raised for M2 (built on the
@@ -53,7 +53,7 @@ then open only the part you need.
 ## By number
 
 Every decision, in numeric order, with the part that holds it. The
-next free number is #42.
+next free number is #43.
 
 - **#1** [Remote bootstrapping and sudo scope](decisions/open.md) — open
 - **#2** [Java agent attach
@@ -119,3 +119,5 @@ next free number is #42.
   apart](decisions/decided/layout-release.md) — decided
 - **#41** [A `-file` glob that matches only a last element says
   so](decisions/decided/tracing-docs-agents.md) — decided
+- **#42** [`query -frames` names a Java stack's
+  frames](decisions/decided/tracing-docs-agents.md) — decided

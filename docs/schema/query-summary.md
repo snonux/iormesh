@@ -33,6 +33,22 @@ that sort first. A reader checks the last line for
 `"event":"truncated"` before decoding lines strictly as events: the
 record lacks the envelope's required fields.
 
+With `-frames` (decision #42, task an4), each line whose event has
+a `java.stack` ends in one more member, `java_frames`: the frame
+text of each id, `class#method(file:line)` in the stack's order
+(innermost first), from the session's methods tables, and
+`method#ID` for an id they lack (a table left out as damaged
+leaves its ids so, and query exits 1 naming it). The member comes
+after the event's own, so the rest of the line is byte for byte the
+event's encoding; such a line is not a strict event until
+`java_frames` is dropped. Lines without a stack, and every line
+without the flag, are unchanged.
+
+```json
+{…,"attribution":"java","java":{"thread":"http-1","stack":[2,4]},
+ "java_frames":["com.shop.Http#send(Http.java:7)","method#4"]}
+```
+
 
 ## Summary rollup (M5)
 

@@ -35,8 +35,10 @@ import (
 // from them alone. The merge runs again so that the slice speaks the
 // merged connection ids (both ends of a fused connection share one) and
 // knows each process's app. -method reads the sessions' methods tables,
-// each checked in the child the same way. Unlike build, query writes
-// nothing: no database import, no new host pin, no build output.
+// each checked in the child the same way, and so does -frames, which
+// names each printed Java stack's frames (decision #42, task an4).
+// Unlike build, query writes nothing: no database import, no new host
+// pin, no build output.
 //
 // The store, not the last build's model, is the input: the model is a
 // bounded summary and holds no event (docs/visualization.md), the
@@ -64,7 +66,10 @@ type queryFlags struct {
 	follow                             bool
 	// windowSegments loads only the window's segments (task ik4).
 	windowSegments bool
-	maxBytes       int64
+	// frames resolves each printed Java stack's ids into java_frames
+	// (decision #42, task an4).
+	frames   bool
+	maxBytes int64
 }
 
 // queryCommand parses query's flags, checks the filter before reading
@@ -110,6 +115,8 @@ func addQueryFlags(fs *flag.FlagSet, f *queryFlags) {
 	fs.StringVar(&f.pid, "pid", "", "process id, in decimal")
 	fs.StringVar(&f.errno, "errno", "", "failed with this errno: a name (ENOENT) or a number (2)")
 	fs.StringVar(&f.otelTrace, "otel-trace", "", "OpenTelemetry trace id (32 hex digits): events inside its spans")
+	fs.BoolVar(&f.frames, "frames", false, "end each line with a Java stack in java_frames: "+
+		"its frames, class#method(file:line), innermost first")
 	fs.Int64Var(&f.maxBytes, "max-bytes", defaultMaxBytes, "output cap in bytes, the truncation record included")
 }
 
@@ -201,7 +208,7 @@ func runQuery(ctx context.Context, e env, f queryFlags, filter query.Filter) err
 	if err := queryWindow(e, f, &filter, sel, paths.store); err != nil {
 		return err
 	}
-	in, err := queryInput(ctx, &segs, filter)
+	in, err := queryInput(ctx, &segs, filter, f.frames)
 	if err != nil {
 		return err
 	}
@@ -281,9 +288,11 @@ func echoQueryWindow(e env, w *federate.Window, note string) error {
 }
 
 // queryInput merges the segments and, for -method, reads the method
-// ids the filter selects; a methods table that fails its check joins
+// ids the filter selects, for -frames every frame of the sessions'
+// tables (frameTexts); a methods table that fails its check joins
 // segs.Bad.
-func queryInput(ctx context.Context, segs *federate.Segments, filter query.Filter) (query.Input, error) {
+func queryInput(ctx context.Context, segs *federate.Segments, filter query.Filter,
+	frames bool) (query.Input, error) {
 	sources := make([]federate.Source, len(segs.Sources))
 	in := query.Input{Sources: make([]query.Source, len(segs.Sources))}
 	for i, s := range segs.Sources {
@@ -296,9 +305,37 @@ func queryInput(ctx context.Context, segs *federate.Segments, filter query.Filte
 	}
 	in.Renames, in.Graph = res.Renames, res.Graph
 	if filter.Method != "" {
-		in.Methods, err = methodIDs(ctx, segs, filter)
+		if in.Methods, err = methodIDs(ctx, segs, filter); err != nil {
+			return query.Input{}, err
+		}
+	}
+	if frames {
+		in.Frames, err = frameTexts(ctx, segs)
 	}
 	return in, err
+}
+
+// frameTexts reads every methods table of the queried sessions as
+// build's rollup does (loadMethodTables: each checked in the child, the
+// rows capped at maxMethodIDs, a failing table added to segs.Bad whole)
+// and keeps each id's frame text, per session. The map is never nil:
+// with no table at all, every id prints as method#<id>. Every table is
+// read, not only the ids the slice prints: the slice is streamed, so
+// its ids are known only once it is written, and a second pass over
+// the events would cost more than the tables.
+func frameTexts(ctx context.Context, segs *federate.Segments) (map[string]map[uint64]string, error) {
+	tables, err := loadMethodTables(ctx, segs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]map[uint64]string, len(tables))
+	for session, rows := range tables {
+		out[session] = make(map[uint64]string, len(rows))
+		for id, m := range rows {
+			out[session][id] = m.Frame
+		}
+	}
+	return out, nil
 }
 
 // reportBad names the segments left out on stderr and fails the
