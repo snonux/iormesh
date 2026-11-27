@@ -12,11 +12,13 @@ import "strings"
 // of them knows, so a new container syntax needs no new parser.
 //
 // A pair is a key (name bytes, see isKeyByte) that ArgvDeny denies, then
-// an optional closing quote (escaped or not), optional blanks, ':' or
-// '=', optional blanks, and a value: a quoted string up to its matching
-// unescaped quote (or to the end when unclosed), an object or array up to
-// its matching bracket (see bracketEnd), or a bare run up to a delimiter
-// (see bareEnd). Only the value becomes Mask; key, quotes and separators
+// an optional closing quote (escaped or not) and closing brackets or
+// parens (a subscript or call, os.environ["PASSWORD"] = x; task op4),
+// optional blanks, ':' or '=', the rest of an operator run ("=>", ":=",
+// "==", see operatorEnd), optional blanks, and a value: a quoted string
+// up to its matching unescaped quote (or to the end when unclosed), an
+// object or array up to its matching bracket (see bracketEnd), or a bare
+// run up to a delimiter (see bareEnd). Only the value becomes Mask; key, quotes and separators
 // stay. An object or array under a denied key is masked whole — its inner
 // keys ({"secrets":{"db":"x"}}) need not be denied themselves; under any
 // other key the scan goes on inside it, pair by pair. open reports a
@@ -33,7 +35,7 @@ func (p Policy) keyValues(s string) (out string, open bool) {
 		if s[i] != ':' && s[i] != '=' || !p.deniedKeyBefore(s, i) {
 			continue
 		}
-		from, to, ok := valueSpan(s, i+1)
+		from, to, ok := valueSpan(s, operatorEnd(s, i+1))
 		if !ok {
 			open = open || from == len(s)
 			continue
@@ -51,12 +53,24 @@ func (p Policy) keyValues(s string) (out string, open bool) {
 }
 
 // deniedKeyBefore reports whether the separator at s[sep] follows a key
-// ArgvDeny denies: blanks, then a closing quote with its escaping
-// backslashes and the blanks inside it, are skipped back over first
-// ("password" : …, \"password\":…, " password ":…).
+// ArgvDeny denies; keyEnd finds where that key ends.
 func (p Policy) deniedKeyBefore(s string, sep int) bool {
-	j := sep
-	for j > 0 && isBlank(s[j-1]) {
+	end := keyEnd(s, sep)
+	j := end
+	for j > 0 && isKeyByte(s[j-1]) {
+		j--
+	}
+	return j < end && denied(p.ArgvDeny, optionKey(s[j:end]))
+}
+
+// keyEnd returns where the key before the separator at s[sep] ends:
+// blanks, then closing brackets and parens (a subscript or call,
+// d["password"] = …, getenv(TOKEN) = …; task op4), then a closing quote
+// with its escaping backslashes and the blanks inside it are skipped back
+// over ("password" : …, \"password\":…, " password ":…).
+func keyEnd(s string, sep int) int {
+	j := blanksBefore(s, sep)
+	for j > 0 && (s[j-1] == ']' || s[j-1] == ')') {
 		j--
 	}
 	if j > 0 && isQuote(s[j-1]) {
@@ -64,15 +78,36 @@ func (p Policy) deniedKeyBefore(s string, sep int) bool {
 		for j > 0 && s[j-1] == '\\' {
 			j--
 		}
-		for j > 0 && isBlank(s[j-1]) {
-			j--
-		}
+		j = blanksBefore(s, j)
 	}
-	end := j
-	for j > 0 && isKeyByte(s[j-1]) {
+	return j
+}
+
+// blanksBefore returns the start of the run of blanks that ends at s[j].
+func blanksBefore(s string, j int) int {
+	for j > 0 && isBlank(s[j-1]) {
 		j--
 	}
-	return j < end && denied(p.ArgvDeny, optionKey(s[j:end]))
+	return j
+}
+
+// operatorEnd returns where the value search starts after a separator
+// whose next byte is s[at]: past the rest of an operator run of '=', '>'
+// and ':' ("=>" of Ruby, PHP and Perl, ":=", "=="), so the value is
+// masked and not the operator (task op4). The run is skipped only when
+// what follows cannot start a bare value — the end, a blank, a quote, an
+// escaped quote or a delimiter (see bareEnd) — or opens an object or
+// array. A run glued to a bare value (password:=x, token==x) may be part
+// of the secret, so it stays and is masked with it.
+func operatorEnd(s string, at int) int {
+	end := at
+	for end < len(s) && strings.IndexByte("=>:", s[end]) >= 0 {
+		end++
+	}
+	if end == len(s) || s[end] == '{' || s[end] == '[' || bareEnd(s, end) == end {
+		return end
+	}
+	return at
 }
 
 // valueSpan returns the [from, to) range of the value that starts after
@@ -170,7 +205,8 @@ func quotedEnd(s string, from int, q byte, k int) int {
 // bareEnd returns where an unquoted value starting at s[at] ends: at
 // white space, a quote, one of ",;&})]", or a run of backslashes that
 // escapes a quote (the end of an escaped string, …\"}). A backslash
-// escaping anything else is part of the value (ab\SEC).
+// escaping anything else is part of the value (ab\SEC); so is a blank it
+// escapes, since a shell keeps "SEK\ RET" one word (task op4).
 func bareEnd(s string, at int) int {
 	for i := at; i < len(s); i++ {
 		switch c := s[i]; {
@@ -185,6 +221,11 @@ func bareEnd(s string, at int) int {
 				return i
 			}
 			i = esc - 1
+			if esc < len(s) && isBlank(s[esc]) {
+				// The blank stays in the value; after an even run ("\\ ")
+				// it is not escaped, and masking past it over-masks only.
+				i = esc
+			}
 		}
 	}
 	return len(s)

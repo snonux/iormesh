@@ -124,6 +124,12 @@ var corpusSyntaxes = [][]string{
 	{"sh", "-c", `curl -d '{"K":"V"}' http://h`},
 	{"sh", "-c", `curl -d "{\"K\": \"V\"}" http://h`},
 	{"sh", "-c", "app --K=V && echo K: V"},
+	{`h = {"K" => "V"}`},
+	{`h = {"K"=>"V"}`},
+	{"K := V"},
+	{`os.environ["K"] = "V"`},
+	{"sh", "-c", `run --K V\ V x`},
+	{"sh", "-c", `export K=V\ V; run`},
 }
 
 // TestArgvKeyValueCorpus plants a value under every denied key family in
@@ -167,6 +173,71 @@ func TestArgvKeyValueKeepsBenign(t *testing.T) {
 	got := Default().Argv([]string{"curl", "-d", `{"username":"bob","password":"x"}`})
 	if !strings.Contains(got[2], `"username":"bob"`) {
 		t.Errorf("username lost: %q", got)
+	}
+}
+
+// TestArgvOperatorsSubscriptsEscapes is task op4's leak: an operator run
+// after the separator ("=>", ":=", "=="), a key in a subscript or call
+// before it (os.environ["PASSWORD"] = …) and a backslash-escaped blank
+// inside a value (a shell keeps "SEK\ RET" one word) each let the secret
+// through. The value is masked; key, operator and structure stay.
+func TestArgvOperatorsSubscriptsEscapes(t *testing.T) {
+	const s = planted
+	cases := []struct{ in, want []string }{
+		{[]string{"ruby", "-e", `h = {"password" => "` + s + `"}`},
+			[]string{"ruby", "-e", `h = {"password" => "***"}`}},
+		// One word with '=' is a KEY=VALUE first: a denied key masks the
+		// rest of the word, closers included (over-masking, no leak).
+		{[]string{"ruby", "-e", `h = {"password"=>"` + s + `"}`},
+			[]string{"ruby", "-e", `h = {"password"=***`}},
+		{[]string{"php", "-r", `$a = ['password' => '` + s + `'];`},
+			[]string{"php", "-r", `$a = ['password' => '***'];`}},
+		{[]string{"perl", "-e", `my %h = (password => "` + s + `");`},
+			[]string{"perl", "-e", `my %h = (password => "***");`}},
+		{[]string{"app", "password := " + s}, []string{"app", "password := ***"}},
+		{[]string{"app", "token == " + s}, []string{"app", "token == ***"}},
+		// A run glued to the value may be part of it: masked with it.
+		{[]string{"app", "{password: :=" + s + "}"}, []string{"app", "{password: ***}"}},
+		{[]string{"app", "{password:>" + s + "}"}, []string{"app", "{password:***}"}},
+		{[]string{"app", "{password:=" + s + "}"}, []string{"app", "{password:***"}},
+		{[]string{"python", "-c", `os.environ["PASSWORD"] = "` + s + `"`},
+			[]string{"python", "-c", `os.environ["PASSWORD"] = "***"`}},
+		{[]string{"python", "-c", `d['api_token']='` + s + `'`},
+			[]string{"python", "-c", `d['api_token']=***`}},
+		{[]string{"python", "-c", `d['api_token'] = '` + s + `'`},
+			[]string{"python", "-c", `d['api_token'] = '***'`}},
+		{[]string{"app", `getenv(secret) = ` + s}, []string{"app", `getenv(secret) = ***`}},
+		{[]string{"sh", "-c", `run --password ` + s + `\ ` + s + ` x`},
+			[]string{"sh", "-c", `run --password *** x`}},
+		{[]string{"sh", "-c", `export PASSWORD=` + s + `\ ` + s + `; run`},
+			[]string{"sh", "-c", `export PASSWORD=*** run`}},
+		{[]string{"app", `{password: ` + s + `\ ` + s + `}`},
+			[]string{"app", `{password: ***}`}},
+	}
+	for _, c := range cases {
+		got := Default().Argv(c.in)
+		if !slices.Equal(got, c.want) || strings.Contains(strings.Join(got, " "), s) {
+			t.Errorf("Argv(%q) =\n %q, want\n %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestArgvOperatorsKeepBenign is op4's negative half: operators, subscripts
+// and escaped blanks around keys that name no secret change nothing.
+func TestArgvOperatorsKeepBenign(t *testing.T) {
+	cases := [][]string{
+		{"ruby", "-e", `h = {"user" => "bob"}`},
+		{"sh", "-c", "test a => b"},
+		{"sh", "-c", "[ x == y ] && z := 1"},
+		{"python", "-c", `d["user"] = "bob"; a[0] = 1`},
+		{"app", "f(x) = y", "a[0]=1"},
+		{"sh", "-c", `cp my\ file /tmp`},
+		{"sh", "-c", `run --user my\ name x`},
+	}
+	for _, in := range cases {
+		if got := Default().Argv(in); !slices.Equal(got, in) {
+			t.Errorf("Argv(%q) = %q, want unchanged", in, got)
+		}
 	}
 }
 
