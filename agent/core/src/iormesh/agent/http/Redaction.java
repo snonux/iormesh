@@ -131,7 +131,8 @@ public final class Redaction {
      * "Bearer abc" yes; "Bearer" alone or "Basically fine" no. White space
      * (see space) before the scheme is skipped and after it ends the
      * scheme word: a TAB ("Bearer\tabc", task qp4) or a no-break space
-     * (task xp4), as internal/redact's authCredential (strings.Fields).
+     * (task xp4), as internal/redact's authCredential, whose white space
+     * is Go's unicode.IsSpace; space lists the same characters.
      */
     private static boolean authCredential(String v) {
         int from = 0;
@@ -158,7 +159,9 @@ public final class Redaction {
      * and the White_Space characters beyond Latin-1. Character.isWhitespace
      * differs both ways — it leaves out the no-break spaces and counts the
      * separators U+001C to U+001F — so the two sides would disagree on
-     * "Bearer&lt;NBSP&gt;token".
+     * "Bearer&lt;NBSP&gt;token". CorpusTest compares this, for every
+     * char, with internal/redact/testdata/space.txt, which Go's
+     * TestSpaceTable keeps equal to unicode.IsSpace.
      */
     static boolean space(char c) {
         switch (c) {

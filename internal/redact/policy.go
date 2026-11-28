@@ -328,8 +328,9 @@ const maxKeyValueDepth = 64
 //
 // Each level hands the rest of the element to argvElem again, whose
 // forms each read all of it, so many short pairs in one element ("a=b"
-// repeated) cost the square of its length (task xp4). Past
-// maxKeyValueDepth levels the rest is masked whole instead: an
+// repeated) cost the square of its length (task xp4). The first
+// maxKeyValueDepth levels are read as usual; a key past them keeps its
+// name and has its value, the rest of the element, masked whole: an
 // over-mask, never a leak, that keeps the work linear. Real elements
 // nest a handful of levels; a "--set a=1,b=2,…" of helm counts one per
 // pair.

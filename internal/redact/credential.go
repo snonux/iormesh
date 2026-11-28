@@ -26,7 +26,9 @@ func (p Policy) credentialValue(value string) bool {
 // strings.Fields): it leads the value or ends the scheme word, a TAB
 // ("Bearer\tabc", task qp4) or a no-break space (task xp4) too, but not
 // the ASCII separators U+001C to U+001F. The Java agent's
-// Redaction.space lists the same characters, so both sides agree.
+// Redaction.space lists the same characters, so both sides agree;
+// testdata/space.txt, checked against both (TestSpaceTable and the
+// agent's CorpusTest), keeps them from drifting.
 func (p Policy) authCredential(value string) bool {
 	words := strings.Fields(value)
 	if len(words) < 2 {

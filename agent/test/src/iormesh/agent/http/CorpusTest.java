@@ -6,7 +6,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,13 +24,38 @@ import java.util.regex.Pattern;
  */
 public final class CorpusTest {
     static final Path CORPUS = Path.of("internal", "redact", "testdata", "corpus.tsv");
+    static final Path SPACE = Path.of("internal", "redact", "testdata", "space.txt");
     static final String CANARY = "SEKRET";
     static final Pattern CODE_POINT = Pattern.compile("<U\\+([0-9A-F]{4})>");
 
     private CorpusTest() {}
 
     public static List<AgentTests.Case> cases() {
-        return List.of(new AgentTests.Case("http/redaction corpus", CorpusTest::corpus));
+        return List.of(new AgentTests.Case("http/redaction corpus", CorpusTest::corpus),
+                new AgentTests.Case("http/redaction white space", CorpusTest::spaceTable));
+    }
+
+    /**
+     * Redaction.space equals Go's unicode.IsSpace for every char (task
+     * xp4): internal/redact/testdata/space.txt lists the code points Go
+     * reports, and internal/redact's TestSpaceTable keeps it so.
+     */
+    static void spaceTable() throws Exception {
+        Set<Integer> go = new HashSet<>();
+        for (String line : Files.readAllLines(SPACE, StandardCharsets.UTF_8)) {
+            String l = line.strip();
+            if (!l.isEmpty() && !l.startsWith("#")) {
+                go.add(Integer.parseInt(l, 16));
+            }
+        }
+        AgentTests.check(!go.isEmpty(), SPACE + ": no code point");
+        List<String> diff = new ArrayList<>();
+        for (int c = 0; c <= 0xFFFF; c++) {
+            if (Redaction.space((char) c) != go.contains(c)) {
+                diff.add(String.format("%04X", c));
+            }
+        }
+        AgentTests.check(diff.isEmpty(), "Redaction.space differs from " + SPACE + " at " + diff);
     }
 
     static void corpus() throws Exception {

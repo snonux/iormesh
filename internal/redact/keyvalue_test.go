@@ -290,6 +290,9 @@ func TestArgvElemLinear(t *testing.T) {
 	for _, unit := range []string{"a=b", "x]=", "a[b]=", "a=b ", "k='a=b c'=", `password=x&`} {
 		small, large := strings.Repeat(unit, 1000), strings.Repeat(unit, 10000)
 		ws, wl := work(small), work(large)
+		if ws <= 0 {
+			t.Fatalf("%q: no work counted; argvElem lost its argvState.work count", unit)
+		}
 		if wl > 12*ws {
 			t.Errorf("%q: work %d for %d bytes, %d for %d bytes (%.0fx for 10x)",
 				unit, ws, len(small), wl, len(large), float64(wl)/float64(ws))
