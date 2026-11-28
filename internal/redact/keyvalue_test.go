@@ -273,6 +273,43 @@ func TestArgvKeyValueLinear(t *testing.T) {
 	}
 }
 
+// TestArgvElemLinear is task xp4's scaling check: many short pairs in one
+// element ("a=b" repeated, "x]=", "a[b]=") each started a KEY=VALUE level
+// that handed the whole rest of the element to argvElem again, so the
+// work grew with the square of the length. It counts the bytes argvElem
+// is handed (argvState.work), a step count that does not depend on the
+// machine: ten times the input may cost at most twelve times the work,
+// where a quadratic scan costs about a hundred times.
+func TestArgvElemLinear(t *testing.T) {
+	work := func(s string) int {
+		n := 0
+		st := argvState{work: &n}
+		_ = Default().word(&st, s)
+		return n
+	}
+	for _, unit := range []string{"a=b", "x]=", "a[b]=", "a=b ", "k='a=b c'=", `password=x&`} {
+		small, large := strings.Repeat(unit, 1000), strings.Repeat(unit, 10000)
+		ws, wl := work(small), work(large)
+		if wl > 12*ws {
+			t.Errorf("%q: work %d for %d bytes, %d for %d bytes (%.0fx for 10x)",
+				unit, ws, len(small), wl, len(large), float64(wl)/float64(ws))
+		}
+	}
+}
+
+// TestArgvKeyValueDepth pins the bound that keeps argvElem linear: up to
+// maxKeyValueDepth KEY=VALUE levels are read as such, past them the rest
+// of the element is masked whole (an over-mask, task xp4).
+func TestArgvKeyValueDepth(t *testing.T) {
+	deep := strings.Repeat("k=", maxKeyValueDepth)
+	if got := Default().Argv([]string{"x", deep + "v"})[1]; got != deep+"v" {
+		t.Errorf("%d levels: got %q, want it unchanged", maxKeyValueDepth, got)
+	}
+	if got := Default().Argv([]string{"x", deep + "k=v"})[1]; got != deep+"k="+Mask {
+		t.Errorf("%d levels: got %q, want the rest masked", maxKeyValueDepth+1, got)
+	}
+}
+
 // BenchmarkArgvKeyValue measures the key-value pass on a 1 MiB element.
 func BenchmarkArgvKeyValue(b *testing.B) {
 	big := strings.Repeat(`{"password":"x","n":1} `, 1<<15)

@@ -54,7 +54,10 @@ an Oracle logon word of `sqlplus`, `user/pass` or
 `user/pass@connect`, has its password masked up to the last
 `@` (`/nolog`, `/`, `/@db`, `@script.sql` and `user@db` are no
 logon). URL userinfo is always masked, query values all
-(decision #22's default). After the specific forms above, one
+(decision #22's default); a query component without `=` is a
+value with no name and masked whole (`/reset?s` →
+`/reset?***`, task xp4), while a `;` parameter before the query
+or a fragment without `=` (`/a;v1`, `#section-2`) stays. After the specific forms above, one
 generic pass looks at every argv element for a denied key
 (optionally quoted or escaped-quoted, optionally inside a
 subscript, call or Perl hash: `os.environ["PASSWORD"]`,
@@ -70,7 +73,8 @@ matching bracket) glued together, so `[]string{"s"}` and
 YAML, dicts, hashes, assignments and pairs inside shell strings
 need no parser of their own (`{"password" => "s"}` →
 `{"password" => "***"}`); the pass is linear in the element's
-length. An object or array under a denied key is masked whole
+length, and so is the whole redaction: an element nests at most
+64 `KEY=VALUE` levels (task xp4). An object or array under a denied key is masked whole
 (`"secrets":***`, `"tokens":***`); under any other key its pairs
 are judged one by one. A blank escaped by a backslash stays in
 its word and its value, as a shell keeps it (`--password a\ s`
@@ -108,7 +112,10 @@ token.txt s3://b/` masks `s3://b/`, and after an option without
 `=` either of the next two words may be the key; a relative path
 with a `/` after `sqlplus` in the same command loses its part
 after the first `/` (a script argument, `sqlplus u/p@db @run.sql
-in/data.csv` → `in/***`, or `sqlplus … && cp a/b c`); and the
+in/data.csv` → `in/***`, or `sqlplus … && cp a/b c`); an
+element past 64 nested `KEY=VALUE` levels (`a=b` repeated, a
+helm `--set` of more than 64 pairs) has the rest after the 64th
+`=` masked, which keeps the work linear; and the
 whole
 `Sec-WebSocket-Protocol` header and `X-Hmac-*` headers are
 masked, ordinary subprotocols included. HTTP headers (M3) use the
@@ -134,10 +141,15 @@ bearer token (`base64url.bearer.authorization.k8s.io.<token>`).
 masked by its shape under any name: one holding a JWT (three
 or five dot-separated base64url parts, the first starting
 `eyJ`) or starting with `Bearer`, `Basic`, `Digest` or
-`Negotiate`, any white space and a credential (a `WWW-Authenticate`
+`Negotiate`, white space and a credential — white space as
+Unicode defines it (Go's `unicode.IsSpace`, which the agent's
+copy lists character for character): a TAB or a no-break space
+counts, the ASCII separators U+001C to U+001F do not (task
+xp4) — (a `WWW-Authenticate`
 challenge such as `Basic realm=x` is masked too, an
 over-mask). URLs in the other headers' values and
-every query value of the path are masked; `location`,
+every query value of the path, a bare one too, are masked;
+`location`,
 `content-location`, `referer`, `origin` and the forward-auth
 headers `x-original-uri`, `x-original-url`, `x-forwarded-uri`,
 `x-rewrite-url` and `x-envoy-original-path` are masked as a URL

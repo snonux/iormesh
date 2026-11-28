@@ -90,7 +90,8 @@ func (p Policy) maskURLs(s string, toWordEnd bool) string {
 // denied parameters. Parameters are split at '&', ';' and '#' and start at
 // the first '?', ';' or '#' after the authority, which also covers JDBC's
 // "jdbc:sqlserver://h;user=a;password=b" and OAuth's
-// "#access_token=x" fragments (a fragment without '=' stays). It never
+// "#access_token=x" fragments (a fragment without '=' stays; a query
+// value without a name, "?TOKEN", does not, see maskParams). It never
 // parses strictly — a malformed URL is masked as far as it can be read,
 // never passed through.
 func (p Policy) URL(raw string) string {
@@ -154,20 +155,25 @@ func maskUserinfo(auth string) string {
 
 // maskParams masks the values of denied parameters in a parameter run that
 // starts with its separator ("?a=1&b=2", ";user=a;password=b",
-// "#access_token=x"). Separators and names stay; a parameter without '='
-// has no value to mask.
+// "#access_token=x"). Separators and names stay. A query component
+// without '=' ("/reset?TOKEN", "?a=1&TOKEN") is a value with no name and
+// is masked whole (see maskParam; task xp4); the query runs from the
+// first '?' to the fragment. A ';' parameter before the query or a
+// fragment without '=' ("/a;v1", "#section-2") is a name, and stays.
 func (p Policy) maskParams(params string) string {
 	var b strings.Builder
-	start := 0
+	start, inQuery, inFragment := 0, false, false
 	for i := 0; i <= len(params); i++ {
 		if i < len(params) && !strings.ContainsRune("?&;#", rune(params[i])) {
 			continue
 		}
 		if i > start {
-			b.WriteString(p.maskParam(params[start:i]))
+			b.WriteString(p.maskParam(params[start:i], inQuery))
 		}
 		if i < len(params) {
 			b.WriteByte(params[i])
+			inFragment = inFragment || params[i] == '#'
+			inQuery = !inFragment && (inQuery || params[i] == '?')
 		}
 		start = i + 1
 	}
@@ -176,9 +182,15 @@ func (p Policy) maskParams(params string) string {
 
 // maskParam masks one "name=value" pair. The name is percent-decoded
 // before matching, so "pass%77ord" cannot slip past a "*password*" glob.
-func (p Policy) maskParam(param string) string {
+// A bare query component (inQuery, no '=') is a value whose name is
+// empty, masked when QueryDeny denies that name: under the default "*",
+// never under a list of names.
+func (p Policy) maskParam(param string, inQuery bool) string {
 	name, _, ok := strings.Cut(param, "=")
 	if !ok {
+		if inQuery && denied(p.QueryDeny, "") {
+			return Mask
+		}
 		return param
 	}
 	key := name

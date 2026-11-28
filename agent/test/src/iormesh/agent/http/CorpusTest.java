@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * The redaction corpus (task qp4), shared with internal/redact's
@@ -21,6 +23,7 @@ import java.util.List;
 public final class CorpusTest {
     static final Path CORPUS = Path.of("internal", "redact", "testdata", "corpus.tsv");
     static final String CANARY = "SEKRET";
+    static final Pattern CODE_POINT = Pattern.compile("<U\\+([0-9A-F]{4})>");
 
     private CorpusTest() {}
 
@@ -47,11 +50,21 @@ public final class CorpusTest {
         AgentTests.check(failures.isEmpty(), String.join("\n", failures));
     }
 
+    /**
+     * An input field with its "&lt;TAB&gt;" and "&lt;U+XXXX&gt;" escapes
+     * (task xp4) turned into the characters they stand for, as
+     * internal/redact's unescapeCorpus does.
+     */
+    static String unescape(String s) {
+        return CODE_POINT.matcher(s.replace("<TAB>", "\t")).replaceAll(
+                m -> Matcher.quoteReplacement(Character.toString(Integer.parseInt(m.group(1), 16))));
+    }
+
     /** null when the case holds, else what went wrong. */
     static String verdict(String[] f) {
         String[] in = Arrays.copyOfRange(f, 3, f.length);
         for (int i = 0; i < in.length; i++) {
-            in[i] = in[i].replace("<TAB>", "\t");
+            in[i] = unescape(in[i]);
         }
         String out = f[0].equals("header") ? Redaction.header(in[0], in[1]) : Redaction.url(in[0]);
         boolean leaked = out.contains(CANARY);

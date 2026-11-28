@@ -45,6 +45,9 @@ public final class HttpProbeTest {
         equal("location: /next?token=***", Redaction.header("Location", "/next?token=x"),
                 "relative Location");
         equal("/plain", Redaction.url("/plain"), "no query");
+        // A query component without '=' is a value with no name (task xp4).
+        equal("/x?***&b=***;***#frag", Redaction.url("/x?tok&b=1;tok#frag"), "bare query value");
+        equal("/a;v1#frag?tok", Redaction.url("/a;v1#frag?tok"), "bare matrix, fragment");
         equal("authorization: ***", Redaction.header("Authorization", "Bearer x"), "denied");
         equal("x-api-token: ***", Redaction.header("X-Api-Token", "t"), "glob *token*");
         equal("set-cookie: ***", Redaction.header("Set-Cookie", "sid=1"), "set-cookie");
@@ -87,12 +90,14 @@ public final class HttpProbeTest {
         for (String v : List.of(jwt, " " + jwt + " ", "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMjMifQ.",
                 "eyJhbGciOiJSU0EtT0FFUCJ9.a.b.c.d", "jwt=" + jwt + "; Path=/", "Bearer abc.def",
                 "bearer abc", "Basic dXNlcjpwYXNz", "Digest username=\"u\", response=\"r\"",
-                "Negotiate YIIGhgYJKoZI")) {
+                "Negotiate YIIGhgYJKoZI", "Bearer\u00a0abc", "Basic\u3000abc",
+                "\u00a0Bearer abc", "Bearer\u2028abc")) {
             equal("x-custom: ***", Redaction.header("X-Custom", v), "credential value " + v);
         }
         for (String v : List.of("1.2.3", "a.b.c", "eyJ", "eyJ.x", "eyJhbGci..x", "Bearer",
                 "Basic ", "Basically fine", "Negotiated rate", "text/html; q=0.9",
-                "www.example.com", "eyJhbGci.eyJzdWIi.sig.x")) {
+                "www.example.com", "eyJhbGci.eyJzdWIi.sig.x", "Bearer\u001cabc",
+                "Basic\u001fabc")) {
             equal("x-custom: " + v, Redaction.header("X-Custom", v), "ordinary value " + v);
         }
     }

@@ -22,8 +22,11 @@ func (p Policy) credentialValue(value string) bool {
 
 // authCredential reports a value whose first word is one of AuthSchemes
 // (any case) with something after it: "Bearer abc" but not "Bearer" alone
-// or "Basically fine". Any white space ends the scheme word, a TAB too
-// ("Bearer\tabc", task qp4).
+// or "Basically fine". White space is what unicode.IsSpace says (through
+// strings.Fields): it leads the value or ends the scheme word, a TAB
+// ("Bearer\tabc", task qp4) or a no-break space (task xp4) too, but not
+// the ASCII separators U+001C to U+001F. The Java agent's
+// Redaction.space lists the same characters, so both sides agree.
 func (p Policy) authCredential(value string) bool {
 	words := strings.Fields(value)
 	if len(words) < 2 {

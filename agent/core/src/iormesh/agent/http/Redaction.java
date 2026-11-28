@@ -26,7 +26,8 @@ import java.util.Locale;
  *   <li>a header value that is a credential by its shape is "name: ***"
  *       under any name: a JWT anywhere in it, or a Bearer, Basic, Digest
  *       or Negotiate scheme with a credential after it;
- *   <li>every query parameter's value is masked ("?user=***&token=***"),
+ *   <li>every query parameter's value is masked ("?user=***&token=***",
+ *       a bare "?TOKEN" too),
  *       decision #22's default, since a query string's names say
  *       nothing reliable about what is secret; ';' and '#' parameters
  *       too, as JDBC and OAuth put credentials there;
@@ -127,20 +128,47 @@ public final class Redaction {
     }
 
     /**
-     * "Bearer abc" yes; "Bearer" alone or "Basically fine" no. Any white
-     * space ends the scheme word, a TAB too ("Bearer\tabc", task qp4),
-     * as internal/redact's authCredential (strings.Fields).
+     * "Bearer abc" yes; "Bearer" alone or "Basically fine" no. White space
+     * (see space) before the scheme is skipped and after it ends the
+     * scheme word: a TAB ("Bearer\tabc", task qp4) or a no-break space
+     * (task xp4), as internal/redact's authCredential (strings.Fields).
      */
-    private static boolean authCredential(String value) {
-        String v = value.strip();
-        int sp = 0;
-        while (sp < v.length() && !Character.isWhitespace(v.charAt(sp))) {
-            sp++;
+    private static boolean authCredential(String v) {
+        int from = 0;
+        while (from < v.length() && space(v.charAt(from))) {
+            from++;
         }
-        if (sp == v.length()) {
+        int to = from;
+        while (to < v.length() && !space(v.charAt(to))) {
+            to++;
+        }
+        int rest = to;
+        while (rest < v.length() && space(v.charAt(rest))) {
+            rest++;
+        }
+        if (rest == v.length()) {
             return false;   // one word, or nothing: no credential after a scheme
         }
-        return AUTH_SCHEMES.contains(v.substring(0, sp).toLowerCase(Locale.ROOT));
+        return AUTH_SCHEMES.contains(v.substring(from, to).toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * Unicode white space, exactly Go's unicode.IsSpace (task xp4): the
+     * ASCII blanks TAB, LF, VT, FF, CR and space, NEL, the no-break space,
+     * and the White_Space characters beyond Latin-1. Character.isWhitespace
+     * differs both ways — it leaves out the no-break spaces and counts the
+     * separators U+001C to U+001F — so the two sides would disagree on
+     * "Bearer&lt;NBSP&gt;token".
+     */
+    static boolean space(char c) {
+        switch (c) {
+            case '\t': case '\n': case 0x0B: case '\f': case '\r': case ' ':
+            case 0x85: case 0xA0: case 0x1680: case 0x2028: case 0x2029:
+            case 0x202F: case 0x205F: case 0x3000:
+                return true;
+            default:
+                return c >= 0x2000 && c <= 0x200A;
+        }
     }
 
     /**
@@ -195,7 +223,8 @@ public final class Redaction {
      * A request target or URL with its userinfo and every parameter value
      * masked: "/login?user=***&token=***". Parameters start at the first
      * '?', ';' or '#' after the authority and are split at each of them
-     * and '&'; a parameter without '=' has no value to mask.
+     * and '&'; a query component without '=' is a value and masked too,
+     * a ';' parameter or fragment without '=' is not (see params).
      */
     public static String url(String raw) {
         if (raw == null) {
@@ -292,23 +321,42 @@ public final class Redaction {
         return auth.substring(0, colon + 1) + MASK + auth.substring(at);
     }
 
-    /** Masks each "name=value" of a run that starts with its separator. */
+    /**
+     * Masks each "name=value" of a run that starts with its separator, as
+     * internal/redact's maskParams under the default "*": a query
+     * component without '=' ("/reset?TOKEN", task xp4) is a value with no
+     * name and masked whole; the query runs from the first '?' to the
+     * fragment. A ';' parameter before the query or a fragment without
+     * '=' ("/a;v1", "#section-2") is a name, and stays.
+     */
     private static String params(String run) {
         StringBuilder b = new StringBuilder(run.length());
         int start = 0;
+        boolean inQuery = false;
+        boolean inFragment = false;
         for (int i = 0; i <= run.length(); i++) {
             if (i < run.length() && "?&;#".indexOf(run.charAt(i)) < 0) {
                 continue;
             }
-            String p = run.substring(start, i);
-            int eq = p.indexOf('=');
-            b.append(eq < 0 ? p : p.substring(0, eq + 1) + MASK);
+            b.append(param(run.substring(start, i), inQuery));
             if (i < run.length()) {
-                b.append(run.charAt(i));
+                char sep = run.charAt(i);
+                b.append(sep);
+                inFragment = inFragment || sep == '#';
+                inQuery = !inFragment && (inQuery || sep == '?');
             }
             start = i + 1;
         }
         return b.toString();
+    }
+
+    /** One parameter masked: "name=***", or "***" for a bare query value. */
+    private static String param(String p, boolean inQuery) {
+        int eq = p.indexOf('=');
+        if (eq >= 0) {
+            return p.substring(0, eq + 1) + MASK;
+        }
+        return inQuery && !p.isEmpty() ? MASK : p;
     }
 
     private static int firstOf(String s, String chars) {

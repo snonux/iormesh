@@ -19,7 +19,9 @@
 #         leak task (zi4, 0j4, rm4, np4, op4, qp4, wp4).
 #
 # Every input holds the canary SEKRET. "<TAB>" in an input stands for a
-# TAB character. Lines starting with '#' and blank lines are skipped.
+# TAB character and "<U+XXXX>" (four upper-case hex digits) for that
+# code point, so white space and other invisible runes stay readable
+# here (task xp4). Lines starting with '#' and blank lines are skipped.
 
 # --- options, KEY=VALUE, environment ----------------------------------
 argv	masked	option =	app	--password=SEKRET
@@ -75,6 +77,7 @@ argv	masked	curl -H bearer	curl	-H	Authorization: Bearer SEKRET	https://h/
 argv	masked	curl -H api key	curl	-H	X-Api-Key: SEKRET	https://h/
 argv	masked	curl --header=	curl	--header=Cookie: sid=SEKRET	https://h/
 argv	masked	curl --oauth2-bearer	curl	--oauth2-bearer	SEKRET	https://h/
+argv	masked	curl bare query value (xp4)	curl	https://h/reset?SEKRET
 argv	masked	curl form body (zi4)	curl	-d	grant_type=client_credentials&client_secret=SEKRET	https://h/token
 argv	masked	curl json body (rm4)	curl	-d	{"password":"SEKRET"}	https://h/
 argv	masked	curl json spaced (rm4)	curl	-d	{"user": "u", "token": "SEKRET"}	https://h/
@@ -265,6 +268,8 @@ header	masked	jwt in a cookie-like value (np4)	X-Custom	jwt=eyJhbGciOiJIUzI1NiJ9
 header	masked	bearer under any name (np4)	X-Custom	Bearer SEKRET
 header	masked	tab after bearer (np4)	X-Custom	Bearer<TAB>SEKRET
 header	masked	tab after basic (np4)	X-Custom	Basic<TAB>SEKRET
+header	masked	no-break space after bearer (xp4)	X-Custom	Bearer<U+00A0>SEKRET
+header	masked	ideographic space after basic (xp4)	X-Custom	Basic<U+3000>SEKRET
 header	masked	referer query	Referer	https://h/cb?code=SEKRET
 header	masked	referer userinfo	Referer	https://u:SEKRET@h/
 header	masked	location fragment	Location	/cb#access_token=SEKRET
@@ -278,6 +283,8 @@ header	limit:innocuous-name	a pair inside a custom header	X-Custom	token=SEKRET
 # --- URLs and request targets -----------------------------------------
 url	masked	query	/login?user=u&password=SEKRET
 url	masked	any query value	/search?q=SEKRET
+url	masked	query value without a name (xp4)	/reset?SEKRET
+url	masked	bare value after a pair (xp4)	/confirm?id=1&SEKRET
 url	masked	userinfo	https://u:SEKRET@h/
 url	masked	lone userinfo	https://SEKRET@h/
 url	masked	'/' in a password	https://u:p/SEKRET@h/x

@@ -29,6 +29,8 @@ import "strings"
 //
 // The scan is linear: each separator looks back only over the bytes
 // since the previous separator, and a masked value is skipped whole.
+// (Many short pairs in one element were quadratic in Argv, not here:
+// argvElem's KEY=VALUE levels, now bounded by keyValueElem; task xp4.)
 func (p Policy) keyValues(s string) (out string, open bool) {
 	var b strings.Builder
 	last := 0

@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -83,12 +84,25 @@ func parseCorpusLine(n int, line string) (corpusCase, error) {
 		return c, fmt.Errorf("expect %q: want masked or limit:<tag>", f[1])
 	}
 	for i := range c.input {
-		c.input[i] = strings.ReplaceAll(c.input[i], "<TAB>", "\t")
+		c.input[i] = unescapeCorpus(c.input[i])
 	}
 	if !strings.Contains(strings.Join(c.input, "\t"), canary) {
 		return c, fmt.Errorf("input holds no %s canary", canary)
 	}
 	return c, nil
+}
+
+// codePoint is the corpus's "<U+XXXX>" escape (task xp4).
+var codePoint = regexp.MustCompile(`<U\+([0-9A-F]{4})>`)
+
+// unescapeCorpus turns an input field's "<TAB>" and "<U+XXXX>" escapes
+// into the runes they stand for, as the Java agent's CorpusTest does.
+func unescapeCorpus(s string) string {
+	s = strings.ReplaceAll(s, "<TAB>", "\t")
+	return codePoint.ReplaceAllStringFunc(s, func(m string) string {
+		r, _ := strconv.ParseUint(m[3:7], 16, 32) // four hex digits: cannot fail
+		return string(rune(r))
+	})
 }
 
 // redact runs the case's input through p as its kind says.

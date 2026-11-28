@@ -32,7 +32,9 @@ func (p Policy) words(st *argvState, s string) (string, bool) {
 	if len(toks) == 1 {
 		toks = splitWords(s, false)
 	}
-	sub := argvState{progs: slices.Clone(st.progs)}
+	// The words of a KEY=VALUE value still count its levels (see
+	// keyValueElem), so nesting through words cannot reset the bound.
+	sub := argvState{progs: slices.Clone(st.progs), kvDepth: st.kvDepth, work: st.work}
 	var b strings.Builder
 	for i, t := range toks {
 		if t.sep {

@@ -212,6 +212,9 @@ func TestHeaderMasksCredentialValues(t *testing.T) {
 		"jwt=" + jwt + "; Path=/",
 		"Bearer abc.def", "bearer abc", "Basic dXNlcjpwYXNz",
 		`Digest username="u", response="r"`, "Negotiate YIIGhgYJKoZI",
+		// Unicode white space ends the scheme word as a blank does, and
+		// leads the value the same (task xp4; the agent's tables equal).
+		"Bearer\u00a0abc", "Basic\u3000abc", "\u00a0Bearer abc", "Bearer\u2028abc",
 	} {
 		if got := Default().Header("X-Custom", value); got != Mask {
 			t.Errorf("Header(X-Custom, %q) = %q, want %q", value, got, Mask)
@@ -228,6 +231,9 @@ func TestHeaderKeepsOrdinaryValues(t *testing.T) {
 		"1.2.3", "a.b.c", "eyJ", "eyJ.x", "eyJhbGci..x", "Bearer", "Basic ",
 		"Basically fine", "Negotiated rate", "text/html; q=0.9",
 		"www.example.com", "eyJhbGci.eyJzdWIi.sig.x", // four parts: no JWT
+		// The ASCII separators U+001C to U+001F are no white space in
+		// Unicode (Java's Character.isWhitespace says they are; task xp4).
+		"Bearer\u001cabc", "Basic\u001fabc",
 	} {
 		if got := Default().Header("X-Custom", value); got != value {
 			t.Errorf("Header(X-Custom, %q) = %q, want it unmasked", value, got)

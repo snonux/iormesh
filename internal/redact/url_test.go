@@ -8,7 +8,16 @@ func TestURL(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/orders?id=42&token=x", "/orders?id=***&token=***"},
 		{"/orders", "/orders"},
-		{"/a?flag&b=", "/a?flag&b=***"},
+		// A query component without '=' is a value with no name, masked
+		// whole (task xp4); a bare ';' parameter or fragment stays.
+		{"/a?flag&b=", "/a?***&b=***"},
+		{"/reset?tok", "/reset?***"},
+		{"/x?a=1&tok&", "/x?a=***&***&"},
+		{"/x?a=1;tok", "/x?a=***;***"},
+		{"/x?tok#frag", "/x?***#frag"},
+		{"/x#frag?tok", "/x#frag?tok"},
+		{"/a;v1?tok", "/a;v1?***"},
+		{"/x?", "/x?"},
 		{"/a?=secret", "/a?=***"},
 		{"https://h/p?x=1#y=2", "https://h/p?x=***#y=***"},
 		{"https://h/cb#access_token=t&state=s", "https://h/cb#access_token=***&state=***"},
@@ -43,6 +52,7 @@ func TestURLSelectiveQuery(t *testing.T) {
 		{"/x?page=2&token=t&Pass%77ord=p", "/x?page=2&token=***&Pass%77ord=***"},
 		{"/x?page=2", "/x?page=2"},
 		{"/x?access_token=t", "/x?access_token=t"},
+		{"/x?tok", "/x?tok"}, // a bare value has no name, only "*" denies it
 	}
 	for _, c := range cases {
 		if got := p.URL(c.in); got != c.want {
@@ -61,6 +71,7 @@ func TestText(t *testing.T) {
 		// is masked with it; the second URL still gets its own span.
 		{"a://x?k=1,b://u:p@y", "a://x?k=***b://u:***@y"},
 		{`"http://u:p@h/"`, `"http://u:***@h/"`},
+		{"see https://h/reset?tok now", "see https://h/reset?*** now"},
 		{"://", "://"},
 		{"x://", "x://"},
 	}

@@ -166,6 +166,10 @@ type argvState struct {
 	progs     []string // lower-cased basenames of program words FlagRules name
 	maskWords int      // words still to mask after a VerbArgs verb or a denied key
 	keyWords  int      // words that may still be the key after a VerbKeyValue verb
+	kvDepth   int      // KEY=VALUE levels around the current word (see keyValueElem)
+	// work, when not nil, adds up the bytes argvElem is handed: the
+	// deterministic step count TestArgvElemLinear holds linear (task xp4).
+	work *int
 }
 
 // Argv returns argv with every secret masked; argv itself is not modified.
@@ -276,6 +280,9 @@ func (p Policy) see(st *argvState, arg string) {
 // are masked; the element then goes on through the other forms, so a URL
 // in it is still masked as a URL.
 func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
+	if st.work != nil {
+		*st.work += len(arg)
+	}
 	if out, ok := p.logonRule(st.progs, arg); ok {
 		return out, false
 	}
@@ -288,15 +295,8 @@ func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 	if isParamRun(arg) {
 		arg = p.paramRun(arg)
 	}
-	// A key with URL, path or space characters is not an option name: in
-	// "https://h/?api_key=x" the '=' belongs to the query string. A denied
-	// first key masks the whole rest, '&' and ';' included.
-	if key, value, ok := strings.Cut(arg, "="); ok && !strings.ContainsAny(key, "/?&#@") && !hasSpace(key) {
-		if denied(p.ArgvDeny, optionKey(key)) {
-			return key + "=" + Mask, false
-		}
-		out, next := p.argvElem(st, value)
-		return key + "=" + out, next
+	if out, next, ok := p.keyValueElem(st, arg); ok {
+		return out, next
 	}
 	if startsWithURL(arg) {
 		return p.urlElem(st, arg)
@@ -314,6 +314,37 @@ func (p Policy) argvElem(st *argvState, arg string) (string, bool) {
 	}
 	// One word: a URL in it runs to the word's end (see wordText).
 	return p.wordText(arg), false
+}
+
+// maxKeyValueDepth bounds the KEY=VALUE levels of one element (see
+// keyValueElem).
+const maxKeyValueDepth = 64
+
+// keyValueElem redacts a KEY=VALUE element; ok is false when arg is none.
+// A key with URL, path or space characters is not an option name: in
+// "https://h/?api_key=x" the '=' belongs to the query string. A denied
+// key masks the whole rest, '&' and ';' included; any other key keeps
+// it, and the value is redacted like an element of its own.
+//
+// Each level hands the rest of the element to argvElem again, whose
+// forms each read all of it, so many short pairs in one element ("a=b"
+// repeated) cost the square of its length (task xp4). Past
+// maxKeyValueDepth levels the rest is masked whole instead: an
+// over-mask, never a leak, that keeps the work linear. Real elements
+// nest a handful of levels; a "--set a=1,b=2,…" of helm counts one per
+// pair.
+func (p Policy) keyValueElem(st *argvState, arg string) (out string, next, ok bool) {
+	key, value, ok := strings.Cut(arg, "=")
+	if !ok || strings.ContainsAny(key, "/?&#@") || hasSpace(key) {
+		return "", false, false
+	}
+	if st.kvDepth >= maxKeyValueDepth || denied(p.ArgvDeny, optionKey(key)) {
+		return key + "=" + Mask, false, true
+	}
+	st.kvDepth++
+	out, next = p.argvElem(st, value)
+	st.kvDepth--
+	return key + "=" + out, next, true
 }
 
 // isParamRun reports what may be a run of "name=value" pairs joined by
