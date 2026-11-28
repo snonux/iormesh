@@ -67,7 +67,12 @@ func TestArgvPositionalKeepsBenignArgs(t *testing.T) {
 		{"sqlplus", "@script.sql"},
 		{"sqlplus", "-S", "scott@orcl"},
 		{"sqlplus", "scott/@orcl"},
-		{"cp", "a/b", "c/d"}, // a logon only under sqlplus
+		{"cp", "a/b", "c/d"}, // a logon only under an Oracle client
+		{"kubectl", "set", "image", "deploy/web", "web=img:2"},
+		{"kubectl", "config", "set", "clusters.c.server", "https://h:6443"},
+		{"kubectl", "config", "set-context", "--current", "--namespace=ns"},
+		{"rman", "target", "/", "cmdfile=backup.rman"},
+		{"expdp", "directory=d", "dumpfile=x.dmp", "schemas=scott"},
 	}
 	for _, in := range cases {
 		if got := Default().Argv(in); !slices.Equal(got, in) {

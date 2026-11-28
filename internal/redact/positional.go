@@ -41,8 +41,13 @@ const (
 // task wp4). The VerbKeyValue programs are those whose "set" command
 // takes credential keys the argv denylist names: aws configure set, npm,
 // yarn and pnpm config set (and npm set), poetry config (no "set" word:
-// poetry config pypi-token.pypi x) and dotnet user-secrets set; poetry
-// and composer also take HTTP basic credentials as two bare words.
+// poetry config pypi-token.pypi x), dotnet user-secrets set and kubectl
+// config set (kubectl config set users.u.token x; "kubectl set image"
+// names no denied key); poetry and composer also take HTTP basic
+// credentials as two bare words. The Logon programs are the Oracle
+// clients that take a logon word as an argument: sqlplus, rman and
+// dgmgrl (rman target sys/x@db), and Data Pump, the classic export and
+// import and SQL*Loader (expdp scott/x@db).
 func defaultPositionalRules() []FlagRule {
 	return []FlagRule{
 		{Program: "redis-cli", Kind: VerbArgs, Verb: "auth", Args: 2},
@@ -54,7 +59,15 @@ func defaultPositionalRules() []FlagRule {
 		{Program: "pnpm", Kind: VerbKeyValue, Verb: "set"},
 		{Program: "poetry", Kind: VerbKeyValue, Verb: "config"},
 		{Program: "user-secrets", Kind: VerbKeyValue, Verb: "set"},
+		{Program: "kubectl", Kind: VerbKeyValue, Verb: "set"},
 		{Program: "sqlplus", Kind: Logon},
+		{Program: "rman", Kind: Logon},
+		{Program: "dgmgrl", Kind: Logon},
+		{Program: "expdp", Kind: Logon},
+		{Program: "impdp", Kind: Logon},
+		{Program: "exp", Kind: Logon},
+		{Program: "imp", Kind: Logon},
+		{Program: "sqlldr", Kind: Logon},
 	}
 }
 

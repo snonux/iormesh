@@ -26,7 +26,7 @@ and the structure stays:
 | `$ENV{PASSWORD} = 's'`, `token[i] = s`, `passwords := []string{"s"}`, `token := []byte("s")` | `$ENV{PASSWORD} = '***'`, `token[i] = ***`, `passwords := ***`, `token := ***` — a Perl hash key, the name before a subscript, a value glued from parts (task qp4) |
 | `psql -c "ALTER USER u PASSWORD 's'"`, `mysql -e "CREATE USER u IDENTIFIED BY 's'"`, `SET PASSWORD FOR u = PASSWORD('s')`, `IDENTIFIED BY s` | `PASSWORD '***'`, `IDENTIFIED BY '***'`, `PASSWORD('***')`, `IDENTIFIED BY ***` — SQL statements, in any element (task qp4) |
 | `--dsn=u:s@tcp(h:3306)/db`, `u:s@unix(/sock)/db`, `u:s@/db` | `u:***@tcp(h:3306)/db`, … — Go MySQL DSNs without a scheme (task qp4) |
-| `redis-cli AUTH s`, `redis-cli auth u s`, `aws configure set aws_secret_access_key s`, `npm config set //r/:_authToken s`, `sqlplus scott/s@db` | `AUTH ***`, `auth *** ***`, `aws_secret_access_key ***`, `//r/:_authToken ***`, `scott/***@db` — positional rules of one program, also in shell strings (decision #44, task wp4) |
+| `redis-cli AUTH s`, `redis-cli auth u s`, `aws configure set aws_secret_access_key s`, `npm config set //r/:_authToken s`, `sqlplus scott/s@db`, `rman target sys/s@db`, `kubectl config set users.u.token s` | `AUTH ***`, `auth *** ***`, `aws_secret_access_key ***`, `//r/:_authToken ***`, `scott/***@db`, `sys/***@db`, `users.u.token ***` — positional rules of one program, also in shell strings (decision #44, task wp4) |
 
 Keys match case-insensitively with `-`, `_` and `.` ignored, so
 one glob covers every spelling. The argv denylist names
@@ -44,13 +44,15 @@ rules (decision #44): `redis-cli`'s `AUTH` (any case) masks the
 two words after it, the password and, in `AUTH user pass`, the
 user; `set` after `aws`, `npm`, `yarn` or `pnpm` (`aws
 configure set`, `npm config set`, `npm set`), `config` after
-`poetry` and `set` after `dotnet user-secrets` read the next
+`poetry`, `set` after `dotnet user-secrets` and `set` after
+`kubectl` (`kubectl config set`) read the next
 word as a key, options before it skipped (`--profile p`,
 `--location=global`, `-g`), and mask the word after it when the
 argv denylist denies the key (`config set color false` stays);
 `http-basic.<repo>` after `poetry config` or `composer config`
 masks the user and password after it; and
-an Oracle logon word of `sqlplus`, `user/pass` or
+an Oracle logon word of `sqlplus`, `rman`, `dgmgrl`, `expdp`,
+`impdp`, `exp`, `imp` or `sqlldr`, `user/pass` or
 `user/pass@connect`, has its password masked up to the last
 `@` (`/nolog`, `/`, `/@db`, `@script.sql` and `user@db` are no
 logon). URL userinfo is always masked, query values all
@@ -108,10 +110,10 @@ of `AUTH user pass`, the next word in a shell string
 (`redis-cli AUTH s && x` → `*** ***`) and a key's value
 (`redis-cli SET auth v` → `***`) too, and so are the user and
 password after `http-basic.<repo>`; any `set` word after `aws`,
-`npm`, `yarn` or `pnpm` counts as the verb, so `aws s3 cp set
+`npm`, `yarn`, `pnpm` or `kubectl` counts as the verb, so `aws s3 cp set
 token.txt s3://b/` masks `s3://b/`, and after an option without
 `=` either of the next two words may be the key; a relative path
-with a `/` after `sqlplus` in the same command loses its part
+with a `/` after one of those Oracle clients in the same command loses its part
 after the first `/` (a script argument, `sqlplus u/p@db @run.sql
 in/data.csv` → `in/***`, or `sqlplus … && cp a/b c`); an
 element past 64 nested `KEY=VALUE` levels (`a=b` repeated, a
@@ -187,7 +189,7 @@ case that keeps its canary:
 | Limit | Example | Why it stays |
 |-------|---------|--------------|
 | `stdin` | `echo s \| docker login --password-stdin`, `echo "AUTH s" \| redis-cli` | the secret is an argument of `echo`; only the pipe to a program reading it from stdin marks it, and a positional rule (decision #44) is scoped to the program that takes the word |
-| `positional` | `sqlplus scott/"x s"@db`, `rman target sys/s@db`, `expdp scott/s@db`, `kubectl config set users.u.token s` | decision #44's rules cover only the programs they name, and a logon word split at a quoted blank loses its shape; another program's grammar needs a rule of its own |
+| `positional` | `sqlplus scott/"x s"@db` | decision #44's rules cover only the programs they name, and a logon word split at a quoted blank loses its shape; another program's grammar needs a rule of its own |
 | `innocuous-name` | `--db s`, `{"db":"s"}`, `X-Custom: s`, `X-Custom: token=s` | the name says nothing; masking every value would hide all arguments and headers |
 | `no-separator` | `<password>s</password>`, `<wsse:Password>s</wsse:Password>`, `password -> s`, `password s` | no `:` or `=` between key and value (XML, an arrow, prose); a parser per syntax is out of scope |
 | `call-argument` | `define('DB_PASSWORD', 's')`, `os.environ.setdefault("TOKEN", "s")`, `System.setProperty("db.password", "s")`, `db.auth("u", "s")` | key and value are separate arguments of a call; which argument is secret depends on the function |

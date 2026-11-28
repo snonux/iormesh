@@ -195,14 +195,20 @@ argv	masked	sqlplus user/password	sqlplus	-S	scott/SEKRET	@report.sql
 argv	masked	sqlplus easy connect	sqlplus	scott/SEKRET@//db:1521/svc
 argv	masked	sqlplus as sysdba in one element	sqlplus	sys/SEKRET@orcl as sysdba
 argv	masked	sqlplus in a shell string	sh	-c	sqlplus -s "scott/SEKRET@orcl" @a.sql
+argv	masked	rman target logon	rman	target	sys/SEKRET@orcl
+argv	masked	rman target and catalog	rman	target	/	catalog	rco/SEKRET@rcat
+argv	masked	dgmgrl logon	dgmgrl	sys/SEKRET@prim
+argv	masked	expdp logon	expdp	scott/SEKRET@orcl	directory=d
+argv	masked	impdp logon in a shell string	sh	-c	impdp system/SEKRET@orcl dumpfile=x.dmp
+argv	masked	classic exp logon	exp	scott/SEKRET	file=x.dmp
+argv	masked	sqlldr logon	sqlldr	scott/SEKRET@orcl	control=c.ctl
+argv	masked	kubectl config set token	kubectl	config	set	users.u.token	SEKRET
+argv	masked	kubectl config set password, option first	kubectl	--kubeconfig	k	config	set	users.u.password	SEKRET
 
 # --- accepted limits --------------------------------------------------
 argv	limit:stdin	echo piped to --password-stdin: only the pipe marks it	sh	-c	echo SEKRET | docker login -u u --password-stdin
 argv	limit:stdin	redis AUTH piped to redis-cli	sh	-c	echo "AUTH SEKRET" | redis-cli
 argv	limit:positional	sqlplus password quoted with a blank	sqlplus	scott/"x SEKRET"@orcl
-argv	limit:positional	rman logon, no rule for rman	rman	target	sys/SEKRET@orcl
-argv	limit:positional	expdp logon, no rule for expdp	expdp	scott/SEKRET@orcl	directory=d
-argv	limit:positional	kubectl config set, no rule for kubectl	kubectl	config	set	users.u.token	SEKRET
 argv	limit:innocuous-name	a secret under a name the denylist does not know	app	--db	SEKRET
 argv	limit:innocuous-name	json under an innocuous key	app	{"db":"SEKRET"}
 argv	limit:no-separator	XML element	curl	-d	<password>SEKRET</password>	h
